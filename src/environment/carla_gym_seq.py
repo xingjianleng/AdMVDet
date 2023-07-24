@@ -2,7 +2,7 @@ import copy
 import os
 from queue import Queue
 import random
-import subprocess
+import docker
 import time
 
 import carla
@@ -15,28 +15,41 @@ import matplotlib.pyplot as plt
 from .cameras import build_cam
 from .utils import loc_dist, pflat
 
-# render quality of CARLA
-QUALITY = ("Epic", "Low")
 # Hack-import objects for spawning
 SpawnActor = carla.command.SpawnActor
 
 
-def run_carla(carla_path, off_screen=False, quality="Epic", gpu=2):
-    assert quality in QUALITY
-    script_path = os.path.join(carla_path, "CarlaUE4.sh")
-    prompt = f"bash {script_path}"
+def run_carla(off_screen=True, quality="Epic", gpu=["0"]):
+    client = docker.from_env()
+
+    env = {}  # Environment variables to set in the container
+    volumes = {}
+
     if off_screen:
-        prompt += " -RenderOffScreen"
-    prompt += f" -quality-level={quality}"
-    if not os.path.exists(script_path):
-        raise FileNotFoundError("CarlaUE4.sh file not found")
-    prompt += f" -ini:[/Script/Engine.RendererSettings]:r.GraphicsAdapter={gpu}"
-    game_proc = subprocess.Popen(prompt, shell=True)
-    # wait for carla to start
-    time.sleep(5.0)
-    # One can use game_proc.poll() to check server status
-    # None -> running, otherwise -> exited
-    return game_proc
+        command = "/bin/bash ./CarlaUE4.sh -RenderOffScreen -quality-level={}".format(quality)
+        volumes = {"/tmp/.X11-unix": {"bind": "/tmp/.X11-unix", "mode": "rw"}}
+    else:
+        env["DISPLAY"] = os.environ['DISPLAY']
+        command = "/bin/bash ./CarlaUE4.sh -quality-level={}".format(quality)
+
+    try:
+        container = client.containers.run("carlasim/carla:0.9.14", 
+                                          command=command, 
+                                          detach=True, 
+                                          privileged=True, 
+                                          network_mode="host", 
+                                          environment=env, 
+                                          volumes=volumes, 
+                                          device_requests=[docker.types.DeviceRequest(device_ids=gpu, capabilities=[['gpu']])])
+         # wait for carla to start
+        while container.status == "created":
+            container.reload()
+            time.sleep(2.0)
+        print(container.logs().decode('utf-8'))
+    except Exception as e:
+        print(f"Error executing command: {e}")
+
+    return container
 
 
 def encode_camera_cfg(cfg, opts):
