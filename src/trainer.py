@@ -15,7 +15,7 @@ from src.utils.decode import ctdet_decode, mvdet_decode
 from src.utils.nms import nms
 from src.utils.meters import AverageMeter
 from src.utils.image_utils import add_heatmap_to_image, img_color_denormalize
-from src.models.mvselect import aggregate_feat, get_eps_thres, update_ema_variables
+from src.models.mvselect import get_eps_thres, update_ema_variables
 
 
 class BaseTrainer(object):
@@ -137,7 +137,7 @@ class PerspectiveTrainer(BaseTrainer):
         t0 = time.time()
         action_sum = torch.zeros([dataloader.dataset.num_cam]).cuda()
         return_avg = None
-        for batch_idx, (imgs, aug_mats, proj_mats, world_gt, imgs_gt, frame, keep_cams, world_coverage) in enumerate(dataloader):
+        for batch_idx, (imgs, aug_mats, proj_mats, world_gt, imgs_gt, frame) in enumerate(dataloader):
             B, N = imgs.shape[:2]
             for key in imgs_gt.keys():
                 imgs_gt[key] = imgs_gt[key].flatten(0, 1)
@@ -146,14 +146,14 @@ class PerspectiveTrainer(BaseTrainer):
             if self.args.interactive:
                 eps_thres = get_eps_thres(epoch - 1 + batch_idx / len(dataloader), self.args.epochs)
                 loss, (action_sum, return_avg, value_loss) = \
-                    self.expand_episode(feat, keep_cams, world_gt['heatmap'], eps_thres, (action_sum, return_avg))
+                    self.expand_episode(feat, world_gt['heatmap'], eps_thres, (action_sum, return_avg))
             else:
-                overall_feat = aggregate_feat(feat, keep_cams, self.model.aggregation)
+                overall_feat = feat.mean(dim=1) if self.model.aggregation == 'mean' else feat.max(dim=1)[0]
                 world_heatmap, world_offset = self.model.get_output(overall_feat)
                 loss_w_hm = focal_loss(world_heatmap, world_gt['heatmap'])
                 loss_w_off = regL1loss(world_offset, world_gt['reg_mask'], world_gt['idx'], world_gt['offset'])
                 # loss_w_id = self.ce_loss(world_id, world_gt['reg_mask'], world_gt['idx'], world_gt['pid'])
-                loss_img_hm = focal_loss(imgs_heatmap, imgs_gt['heatmap'], keep_cams.view(B * N, 1, 1, 1))
+                loss_img_hm = focal_loss(imgs_heatmap, imgs_gt['heatmap'])
                 loss_img_off = regL1loss(imgs_offset, imgs_gt['reg_mask'], imgs_gt['idx'], imgs_gt['offset'])
                 loss_img_wh = regL1loss(imgs_wh, imgs_gt['reg_mask'], imgs_gt['idx'], imgs_gt['wh'])
                 # loss_img_id = self.ce_loss(imgs_id, imgs_gt['reg_mask'], imgs_gt['idx'], imgs_gt['pid'])
@@ -201,7 +201,7 @@ class PerspectiveTrainer(BaseTrainer):
         modas, modps, precs, recalls = torch.zeros([K]), torch.zeros([K]), torch.zeros([K]), torch.zeros([K])
         res_list = [[] for _ in range(K)]
         action_sum = torch.zeros([K, dataloader.dataset.num_cam]).cuda()
-        for batch_idx, (imgs, aug_mats, proj_mats, world_gt, imgs_gt, frame, keep_cams, world_coverage) in enumerate(dataloader):
+        for batch_idx, (imgs, aug_mats, proj_mats, world_gt, imgs_gt, frame) in enumerate(dataloader):
             B, N = imgs_gt['heatmap'].shape[:2]
             world_heatmaps, world_offsets, actions = [], [], []
             with torch.no_grad():
@@ -216,7 +216,7 @@ class PerspectiveTrainer(BaseTrainer):
                     # K, B, N
                     for k in range(K):
                         overall_feat, (_, _, action, _) = \
-                            self.model.do_steps(feat, init_cam[k].repeat([B, 1]), self.args.steps, keep_cams)
+                            self.model.do_steps(feat, init_cam[k].repeat([B, 1]), self.args.steps)
                         world_heatmap, world_offset = self.model.get_output(overall_feat)
                         world_heatmaps.append(world_heatmap)
                         world_offsets.append(world_offset)

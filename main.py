@@ -69,7 +69,7 @@ def main(args):
         train_set = frameDataset(base, split='trainval', world_reduce=args.world_reduce,
                                  img_reduce=args.img_reduce, world_kernel_size=args.world_kernel_size,
                                  img_kernel_size=args.img_kernel_size,
-                                 dropout=args.dropcam, augmentation=args.augmentation)
+                                 augmentation=args.augmentation)
         val_set = frameDataset(base, split='val', world_reduce=args.world_reduce,
                                img_reduce=args.img_reduce, world_kernel_size=args.world_kernel_size,
                                img_kernel_size=args.img_kernel_size)
@@ -93,7 +93,7 @@ def main(args):
         train_set = frameDataset(base, split='trainval', world_reduce=args.world_reduce,
                                  img_reduce=args.img_reduce, world_kernel_size=args.world_kernel_size,
                                  img_kernel_size=args.img_kernel_size,
-                                 dropout=args.dropcam, augmentation=args.augmentation)
+                                 augmentation=args.augmentation)
         val_set = frameDataset(base, split='val', world_reduce=args.world_reduce,
                                img_reduce=args.img_reduce, world_kernel_size=args.world_kernel_size,
                                img_kernel_size=args.img_kernel_size)
@@ -123,7 +123,7 @@ def main(args):
                   f'select{args.select_lr}' if args.interactive else ''
     logdir = f'logs/{args.dataset}/{"DEBUG_" if is_debug else ""}{args.arch}_{args.aggregation}_down{args.down}_' \
              f'{"RL_" if args.interactive else ""}' \
-             f'lr{args.lr}{lr_settings}_b{args.batch_size}_e{args.epochs}_dropcam{args.dropcam}_' \
+             f'lr{args.lr}{lr_settings}_b{args.batch_size}_e{args.epochs}_' \
              f'{datetime.datetime.today():%Y-%m-%d_%H-%M-%S}' if not args.eval \
         else f'logs/{args.dataset}/EVAL_{args.resume}'
     os.makedirs(logdir, exist_ok=True)
@@ -224,7 +224,6 @@ if __name__ == '__main__':
                         choices=['wildtrack', 'multiviewx', 'modelnet40_12', 'modelnet40_20', 'scanobjectnn', 'carlax'])
     parser.add_argument('-j', '--num_workers', type=int, default=4)
     parser.add_argument('-b', '--batch_size', type=int, default=None, help='input batch size for training')
-    parser.add_argument('--dropcam', type=float, default=0.0)
     parser.add_argument('--epochs', type=int, default=10, help='number of epochs to train')
     parser.add_argument('--lr', type=float, default=None, help='learning rate for task network')
     parser.add_argument('--select_lr', type=float, default=None, help='learning rate for MVselect')
