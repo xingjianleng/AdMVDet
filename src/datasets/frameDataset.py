@@ -278,7 +278,7 @@ class frameDataset(VisionDataset):
                     for cam in range(self.num_cam)}
             img_bboxs, img_pids = zip(*self.imgs_gt[frame].values())
             world_pts, world_pids = self.world_gt[frame]
-        return self.prepare_gt(frame, imgs, self.proj_mats, world_pts, world_pids, img_bboxs, img_pids)
+        return *self.prepare_gt(frame, imgs, self.proj_mats, world_pts, world_pids, img_bboxs, img_pids), self.Rworld_coverage
 
     def step(self, action):
         observation, reward, done, info = self.base.env.step(action)
@@ -296,7 +296,7 @@ class frameDataset(VisionDataset):
         imgs = observation["images"]
         world_pts, world_lwh, world_pids, img_bboxs, img_pids = self.get_carla_gt_targets(info["pedestrian_gts"])
         world_pts, world_pids = world_pts[:, :2], world_pids
-        return self.prepare_gt(frame, imgs, self.proj_mats, world_pts, world_pids, img_bboxs, img_pids), done
+        return *self.prepare_gt(frame, imgs, self.proj_mats, world_pts, world_pids, img_bboxs, img_pids), self.Rworld_coverage, done
 
     def prepare_gt(self, frame, imgs, proj_mats, world_pts, world_pids, img_bboxs, img_pids, visualize=False):
         def plt_visualize():

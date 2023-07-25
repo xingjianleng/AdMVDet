@@ -32,6 +32,7 @@ def run_carla(off_screen=True, quality="Epic", gpu=["0"]):
         env["DISPLAY"] = os.environ['DISPLAY']
         command = "/bin/bash ./CarlaUE4.sh -quality-level={}".format(quality)
 
+    container = None
     try:
         container = client.containers.run("carlasim/carla:0.9.14", 
                                           command=command, 

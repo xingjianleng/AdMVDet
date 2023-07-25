@@ -49,7 +49,7 @@ class BaseTrainer(object):
             init_prob = F.one_hot(torch.tensor(init_cam).repeat(B), num_classes=N).cuda()
 
             # rollout episode
-            for i in range(self.args.steps):
+            for i in range(self.model.dataset.num_cam):
                 task_loss, reward, done, (log_prob, value, action, entropy) = \
                     self.rollout(i, (feat, init_prob, keep_cams), tgt, eps_thres)
                 # TD update
@@ -76,8 +76,8 @@ class BaseTrainer(object):
             task_loss_s, value_loss_s = torch.stack(task_loss_s), torch.stack(value_loss_s)
             # calculate returns for each step in episode
             R = torch.zeros([B]).cuda()
-            returns = torch.empty([self.args.steps, B]).cuda().float()
-            for i in reversed(range(self.args.steps)):
+            returns = torch.empty([self.model.dataset.num_cam, B]).cuda().float()
+            for i in reversed(range(self.model.dataset.num_cam)):
                 R = rewards[i] + self.args.gamma * R
                 returns[i] = R
             return_avg = returns.mean(1) if return_avg is None else returns.mean(1) * 0.05 + return_avg * 0.95
@@ -137,13 +137,13 @@ class PerspectiveTrainer(BaseTrainer):
         t0 = time.time()
         action_sum = torch.zeros([dataloader.dataset.num_cam]).cuda()
         return_avg = None
-        for batch_idx, (imgs, aug_mats, proj_mats, world_gt, imgs_gt, frame, keep_cams) in enumerate(dataloader):
+        for batch_idx, (imgs, aug_mats, proj_mats, world_gt, imgs_gt, frame, keep_cams, world_coverage) in enumerate(dataloader):
             B, N = imgs.shape[:2]
             for key in imgs_gt.keys():
                 imgs_gt[key] = imgs_gt[key].flatten(0, 1)
             feat, (imgs_heatmap, imgs_offset, imgs_wh) = \
                 self.model.get_feat(imgs.cuda(), aug_mats, proj_mats, self.args.down)
-            if self.args.steps:
+            if self.args.interactive:
                 eps_thres = get_eps_thres(epoch - 1 + batch_idx / len(dataloader), self.args.epochs)
                 loss, (action_sum, return_avg, value_loss) = \
                     self.expand_episode(feat, keep_cams, world_gt['heatmap'], eps_thres, (action_sum, return_avg))
@@ -184,7 +184,7 @@ class PerspectiveTrainer(BaseTrainer):
                 t_epoch = t1 - t0
                 print(f'Train epoch: {epoch}, batch:{(batch_idx + 1)}, '
                       f'loss: {losses / (batch_idx + 1):.3f}, time: {t_epoch:.1f}')
-                if self.args.steps:
+                if self.args.interactive:
                     print(f'value loss: {value_loss:.3f}, eps: {eps_thres:.3f}, return: {return_avg[-1]:.2f}')
                     # print(f'value loss: {value_loss:.3f}, policy loss: {policy_loss:.3f}, '
                     #       f'return: {return_avg[-1]:.2f}, entropy: {entropies.mean():.3f}')
@@ -201,11 +201,11 @@ class PerspectiveTrainer(BaseTrainer):
         modas, modps, precs, recalls = torch.zeros([K]), torch.zeros([K]), torch.zeros([K]), torch.zeros([K])
         res_list = [[] for _ in range(K)]
         action_sum = torch.zeros([K, dataloader.dataset.num_cam]).cuda()
-        for batch_idx, (imgs, aug_mats, proj_mats, world_gt, imgs_gt, frame, keep_cams) in enumerate(dataloader):
+        for batch_idx, (imgs, aug_mats, proj_mats, world_gt, imgs_gt, frame, keep_cams, world_coverage) in enumerate(dataloader):
             B, N = imgs_gt['heatmap'].shape[:2]
             world_heatmaps, world_offsets, actions = [], [], []
             with torch.no_grad():
-                if self.args.steps == 0 or init_cam is None:
+                if not self.args.interactive or init_cam is None:
                     (world_heatmap, world_offset), _, (_, _, action, _) = \
                         self.model(imgs.cuda(), aug_mats, proj_mats, self.args.down)
                     world_heatmaps.append(world_heatmap)
