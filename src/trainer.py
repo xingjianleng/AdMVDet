@@ -204,11 +204,11 @@ class PerspectiveTrainer(BaseTrainer):
             world_heatmaps, world_offsets, actions = [], [], []
             with torch.no_grad():
                 if not self.args.interactive or init_cam is None:
-                    (world_heatmap, world_offset), _, (_, _, action, _) = \
+                    (world_heatmap, world_offset), _ = \
                         self.model(imgs.cuda(), aug_mats, proj_mats, self.args.down)
                     world_heatmaps.append(world_heatmap)
                     world_offsets.append(world_offset)
-                    actions.append(action)
+                    actions.append(None)
                 else:
                     feat, _ = self.model.get_feat(imgs.cuda(), aug_mats, self.args.down)
                     # K, B, N
