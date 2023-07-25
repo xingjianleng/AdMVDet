@@ -21,8 +21,6 @@ from src.models.mvselect import get_eps_thres, update_ema_variables
 class BaseTrainer(object):
     def __init__(self, model, logdir, args, ):
         self.model = model
-        self.target_model = copy.deepcopy(model.select_module)
-        self.target_model.eval()
         self.args = args
         self.logdir = logdir
         self.denormalize = img_color_denormalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))

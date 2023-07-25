@@ -393,35 +393,3 @@ if __name__ == '__main__':
                 (imgs, M, proj_mats, world_gt, imgs_gt, frame), done = dataset.step(np.random.rand(7))
 
     print(time.time() - t0)
-    pass
-    if False:
-        import matplotlib.pyplot as plt
-        from src.utils.projection import get_worldcoord_from_imagecoord
-
-        world_grid_maps = []
-        xx, yy = np.meshgrid(np.arange(0, 1920, 20), np.arange(0, 1080, 20))
-        H, W = xx.shape
-        image_coords = np.stack([xx, yy], axis=2).reshape([-1, 2])
-        for cam in range(dataset.num_cam):
-            world_coords = get_worldcoord_from_imagecoord(image_coords.transpose(),
-                                                          dataset.base.intrinsic_matrices[cam],
-                                                          dataset.base.extrinsic_matrices[cam])
-            world_grids = dataset.base.get_worldgrid_from_worldcoord(world_coords).transpose().reshape([H, W, 2])
-            world_grid_map = np.zeros(dataset.worldgrid_shape)
-            for i in range(H):
-                for j in range(W):
-                    x, y = world_grids[i, j]
-                    if dataset.base.indexing == 'xy':
-                        if x in range(dataset.worldgrid_shape[1]) and y in range(dataset.worldgrid_shape[0]):
-                            world_grid_map[int(y), int(x)] += 1
-                    else:
-                        if x in range(dataset.worldgrid_shape[0]) and y in range(dataset.worldgrid_shape[1]):
-                            world_grid_map[int(x), int(y)] += 1
-            world_grid_map = world_grid_map != 0
-            plt.imshow(world_grid_map)
-            plt.show()
-            world_grid_maps.append(world_grid_map)
-            pass
-        plt.imshow(np.sum(np.stack(world_grid_maps), axis=0))
-        plt.show()
-        pass

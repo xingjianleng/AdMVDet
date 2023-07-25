@@ -16,11 +16,10 @@ from torch import optim
 from torch.utils.data import DataLoader
 from src.datasets import *
 from src.models.mvdet import MVDet
-from src.models.mvcnn import MVCNN
 from src.utils.logger import Logger
 from src.utils.draw_curve import draw_curve
 from src.utils.str2bool import str2bool
-from src.trainer import PerspectiveTrainer, find_dataset_lvl_strategy
+from src.trainer import PerspectiveTrainer
 
 
 def main(args):
@@ -221,7 +220,7 @@ if __name__ == '__main__':
     parser.add_argument('--arch', type=str, default='resnet18')
     parser.add_argument('--aggregation', type=str, default='max', choices=['mean', 'max'])
     parser.add_argument('-d', '--dataset', type=str, default='wildtrack',
-                        choices=['wildtrack', 'multiviewx', 'modelnet40_12', 'modelnet40_20', 'scanobjectnn', 'carlax'])
+                        choices=['wildtrack', 'multiviewx', 'carlax'])
     parser.add_argument('-j', '--num_workers', type=int, default=4)
     parser.add_argument('-b', '--batch_size', type=int, default=None, help='input batch size for training')
     parser.add_argument('--epochs', type=int, default=10, help='number of epochs to train')

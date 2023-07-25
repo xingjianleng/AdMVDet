@@ -7,7 +7,7 @@ import torchvision.transforms as T
 from kornia.geometry import warp_perspective
 from src.models.resnet import resnet18
 from src.models.shufflenetv2 import shufflenet_v2_x0_5
-from src.models.mvselect import CamSelect
+from src.models.mvcontrol import CamControl
 from src.models.multiview_base import MultiviewBase
 from src.utils.image_utils import img_color_denormalize, array2heatmap
 from src.utils.projection import get_worldcoord_from_imgcoord_mat, project_2d_points
@@ -66,8 +66,16 @@ class MVDet(MultiviewBase):
                                         nn.Conv2d(hidden_dim, hidden_dim, 3, padding=2, dilation=2), nn.ReLU(),
                                         nn.Conv2d(hidden_dim, hidden_dim, 3, padding=4, dilation=4), nn.ReLU(), )
 
-        # select camera based on initialization
-        self.select_module = CamSelect(dataset.num_cam, hidden_dim, 3, aggregation)
+        # only activate the control module for CarlaX dataset
+        if dataset.base.__name__ == "CarlaX" and dataset.interactive:
+            all_actions = ['x', 'y', 'z', 'pitch', 'yaw', 'roll', 'fov']
+            indices = []
+            for action_name in dataset.base.env.opts["env_action_space"].split("-"):
+                indices.append(all_actions.index(action_name))
+            action_space = dataset.base.env.action_space
+            action_min = action_space.low[indices]
+            action_max = action_space.high[indices]
+            self.control_module = CamControl((action_min, action_max), hidden_dim, 3, aggregation)
 
         # world heads
         self.world_heatmap = output_head(hidden_dim, outfeat_dim, 1)
