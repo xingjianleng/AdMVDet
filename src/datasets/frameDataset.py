@@ -279,7 +279,7 @@ class frameDataset(VisionDataset):
             world_pts, world_pids = self.world_gt[frame]
         return self.prepare_gt(frame, imgs, self.proj_mats, world_pts, world_pids, img_bboxs, img_pids)
 
-    def step(self, action):
+    def step(self, action, frame):
         observation, reward, done, info = self.base.env.step(action)
 
         # get camera matrices

@@ -52,4 +52,4 @@ class CamControl(nn.Module):
         log_prob = action_dist.log_prob(action)
 
         # return log_prob, state_value, action, entropy
-        return log_prob, state_value, action
+        return log_prob, state_value, action.detach().cpu().numpy()

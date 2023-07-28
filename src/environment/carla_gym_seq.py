@@ -193,11 +193,24 @@ class CarlaCameraSeqEnv(gym.Env):
         self.pedestrians = []
         self.pedestrian_gts = []
 
+    def format_action(self, action):
+        # Encode an action with effective action space to a fixed actions space as in gym env
+        rtn_action = np.zeros(self.action_space.shape)
+        for action_name, value in zip(self.opts["env_action_space"].split("-"), action):
+            if 'x' == action_name: rtn_action[0] = value
+            if 'y' == action_name: rtn_action[1] = value
+            if 'z' == action_name: rtn_action[2] = value
+            if 'pitch' == action_name: rtn_action[3] = value
+            if 'yaw' == action_name: rtn_action[4] = value
+            if 'roll' == action_name: rtn_action[5] = value
+            if 'fov' == action_name: rtn_action[6] = value
+        return rtn_action
+
     def action(self, act):
         # camera config for the next camera
         # allow more flexible choice of action space (x-y-z-pitch-yaw-roll-fov)
         # convert normalised action space to unnormalised ones
-        _location, _rotation, _fov = decode_camera_cfg(act, self.opts)
+        _location, _rotation, _fov = decode_camera_cfg(self.format_action(act), self.opts)
         action_space = self.opts["env_action_space"].split("-")
         # default settings for limited action space
         location, rotation, fov = np.array(self.opts["cam_pos_lst"])[self.step_counter], \
