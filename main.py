@@ -62,19 +62,19 @@ def main(args):
         args.num_workers = 0
         result_type = ['moda', 'modp', 'prec', 'recall']
         args.lr = 5e-4 if args.lr is None else args.lr
-        args.select_lr = 1e-4 if args.select_lr is None else args.select_lr
+        args.control_lr = 1e-4 if args.control_lr is None else args.control_lr
         args.batch_size = 1 if args.batch_size is None else args.batch_size
 
         train_set = frameDataset(base, split='trainval', world_reduce=args.world_reduce,
                                  img_reduce=args.img_reduce, world_kernel_size=args.world_kernel_size,
                                  img_kernel_size=args.img_kernel_size,
-                                 augmentation=args.augmentation)
+                                 augmentation=args.augmentation, interactive=args.interactive)
         val_set = frameDataset(base, split='val', world_reduce=args.world_reduce,
                                img_reduce=args.img_reduce, world_kernel_size=args.world_kernel_size,
-                               img_kernel_size=args.img_kernel_size)
+                               img_kernel_size=args.img_kernel_size, interactive=args.interactive)
         test_set = frameDataset(base, split='test', world_reduce=args.world_reduce,
                                 img_reduce=args.img_reduce, world_kernel_size=args.world_kernel_size,
-                                img_kernel_size=args.img_kernel_size)
+                                img_kernel_size=args.img_kernel_size, interactive=args.interactive)
     else:
         if args.dataset == 'wildtrack':
             base = Wildtrack(os.path.expanduser('~/Data/Wildtrack'))
@@ -86,7 +86,7 @@ def main(args):
         args.task = 'mvdet'
         result_type = ['moda', 'modp', 'prec', 'recall']
         args.lr = 5e-4 if args.lr is None else args.lr
-        args.select_lr = 1e-4 if args.select_lr is None else args.select_lr
+        args.control_lr = 1e-4 if args.control_lr is None else args.control_lr
         args.batch_size = 1 if args.batch_size is None else args.batch_size
 
         train_set = frameDataset(base, split='trainval', world_reduce=args.world_reduce,
@@ -119,7 +119,7 @@ def main(args):
 
     # logging
     lr_settings = f'base{args.base_lr_ratio}other{args.other_lr_ratio}' + \
-                  f'select{args.select_lr}' if args.interactive else ''
+                  f'control{args.control_lr}' if args.interactive else ''
     logdir = f'logs/{args.dataset}/{"DEBUG_" if is_debug else ""}{args.arch}_{args.aggregation}_down{args.down}_' \
              f'{"RL_" if args.interactive else ""}' \
              f'lr{args.lr}{lr_settings}_b{args.batch_size}_e{args.epochs}_' \
@@ -142,13 +142,9 @@ def main(args):
 
     # load checkpoint
     if args.interactive:
-        with open(f'logs/{args.dataset}/{args.arch}_performance.txt', 'r') as fp:
-            result_str = fp.read()
-        print(result_str)
-        load_dir = result_str.split('\n')[1].replace('# ', '')
-        pretrained_dict = torch.load(f'{load_dir}/model.pth')
+        pretrained_dict = torch.load(os.path.join(f'logs/{args.dataset}/', 'base.pth'))
         model_dict = model.state_dict()
-        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict and 'select' not in k}
+        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict and 'control' not in k}
         model_dict.update(pretrained_dict)
         model.load_state_dict(model_dict)
 
@@ -161,12 +157,12 @@ def main(args):
         model.load_state_dict(model_dict)
 
     param_dicts = [{"params": [p for n, p in model.named_parameters()
-                               if 'base' not in n and 'select' not in n and p.requires_grad],
+                               if 'base' not in n and 'control' not in n and p.requires_grad],
                     "lr": args.lr * args.other_lr_ratio, },
                    {"params": [p for n, p in model.named_parameters() if 'base' in n and p.requires_grad],
                     "lr": args.lr * args.base_lr_ratio, },
-                   {"params": [p for n, p in model.named_parameters() if 'select' in n and p.requires_grad],
-                    "lr": args.select_lr, }, ]
+                   {"params": [p for n, p in model.named_parameters() if 'control' in n and p.requires_grad],
+                    "lr": args.control_lr, }, ]
     optimizer = optim.Adam(param_dicts, lr=args.lr, weight_decay=args.weight_decay)
 
     def warmup_lr_scheduler(epoch, warmup_epochs=0.1 * args.epochs):
@@ -212,10 +208,13 @@ def main(args):
     #     trainer.test(test_loader, torch.eye(N))
     trainer.test(test_loader)
 
+    # copy base model file
+    if args.dataset == 'carlax' and not args.interactive:
+        shutil.copy(os.path.join(logdir, 'model.pth'), os.path.join(f'logs/{args.dataset}/', 'base.pth'))
 
 if __name__ == '__main__':
     # common settings
-    parser = argparse.ArgumentParser(description='view selection for multiview classification & detection')
+    parser = argparse.ArgumentParser(description='camera position control for multiview classification & detection')
     parser.add_argument('--eval', action='store_true', help='evaluation only')
     parser.add_argument('--arch', type=str, default='resnet18')
     parser.add_argument('--aggregation', type=str, default='max', choices=['mean', 'max'])
@@ -225,7 +224,7 @@ if __name__ == '__main__':
     parser.add_argument('-b', '--batch_size', type=int, default=None, help='input batch size for training')
     parser.add_argument('--epochs', type=int, default=10, help='number of epochs to train')
     parser.add_argument('--lr', type=float, default=None, help='learning rate for task network')
-    parser.add_argument('--select_lr', type=float, default=None, help='learning rate for MVselect')
+    parser.add_argument('--control_lr', type=float, default=None, help='learning rate for MVcontrol')
     parser.add_argument('--base_lr_ratio', type=float, default=1.0)
     parser.add_argument('--other_lr_ratio', type=float, default=1.0)
     parser.add_argument('--weight_decay', type=float, default=1e-4)
