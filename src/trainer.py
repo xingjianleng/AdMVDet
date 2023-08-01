@@ -203,7 +203,7 @@ class PerspectiveTrainer(BaseTrainer):
                         loss = focal_loss(world_heatmap, world_gt['heatmap'])
                 else:
                     # interactive mode, initial feat
-                    feat, _ = self.model.get_feat(imgs.cuda(), aug_mats, self.args.down)
+                    feat, _ = self.model.get_feat(imgs.cuda(), aug_mats, proj_mats, self.args.down)
 
                     # provide the initial feat, expand episode to get new feat and actions
                     loss, (return_avg, _, _), (feat, actions) = \
