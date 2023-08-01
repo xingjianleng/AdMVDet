@@ -190,7 +190,7 @@ def main(args):
             train_loss, train_prec = trainer.train(epoch, train_loader, optimizer, scheduler)
             if epoch % max(args.epochs // 10, 1) == 0:
                 print('Testing...')
-                test_loss, test_prec = trainer.test(test_loader, torch.eye(N) if args.interactive else None)
+                test_loss, test_prec = trainer.test(test_loader)
 
                 # draw & save
                 x_epoch.append(epoch)
@@ -204,8 +204,6 @@ def main(args):
 
     print('Test loaded model...')
     print(logdir)
-    # if args.eval:
-    #     trainer.test(test_loader, torch.eye(N))
     trainer.test(test_loader)
 
     # copy base model file
@@ -238,7 +236,6 @@ if __name__ == '__main__':
     parser.add_argument('--interactive', type=str2bool, default=False)
     parser.add_argument('--gamma', type=float, default=0.99, help='reward discount factor (default: 0.99)')
     parser.add_argument('--down', type=int, default=1, help='down sample the image to 1/N size')
-    # parser.add_argument('--beta_entropy', type=float, default=0.01)
     # multiview detection specific settings
     parser.add_argument('--reID', action='store_true')
     parser.add_argument('--augmentation', type=str2bool, default=True)
