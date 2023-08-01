@@ -212,13 +212,14 @@ def main(args):
     if args.dataset == 'carlax' and not args.interactive:
         shutil.copy(os.path.join(logdir, 'model.pth'), os.path.join(f'logs/{args.dataset}/', 'base.pth'))
 
+
 if __name__ == '__main__':
     # common settings
     parser = argparse.ArgumentParser(description='camera position control for multiview classification & detection')
     parser.add_argument('--eval', action='store_true', help='evaluation only')
     parser.add_argument('--arch', type=str, default='resnet18')
     parser.add_argument('--aggregation', type=str, default='max', choices=['mean', 'max'])
-    parser.add_argument('-d', '--dataset', type=str, default='wildtrack',
+    parser.add_argument('-d', '--dataset', type=str, default='carlax',
                         choices=['wildtrack', 'multiviewx', 'carlax'])
     parser.add_argument('-j', '--num_workers', type=int, default=4)
     parser.add_argument('-b', '--batch_size', type=int, default=None, help='input batch size for training')
