@@ -31,11 +31,15 @@ class BaseTrainer(object):
             self.model.control_module(feat)
         
         # squeeze from batch
-        log_prob, state_value, action = log_prob.squeeze(), state_value.squeeze(), action.squeeze()
+        log_prob, action = log_prob.squeeze(), action.squeeze()
         
         # step the current action into the environment, get rid of the batch, get the new feat
         (imgs, aug_mats, proj_mats, _, _, _), done = dataset.step(action, frame)
-        # FIXME: unsqueeze to make batch
+        # unsqueeze to make batch
+        imgs = imgs.unsqueeze(0)
+        aug_mats = aug_mats.unsqueeze(0)
+        proj_mats = proj_mats.unsqueeze(0)
+        # extract corresponding features
         new_feat, _ = \
                 self.model.get_feat(imgs.cuda(), aug_mats, proj_mats, self.args.down)
         feat[:, step, :, :, :] = new_feat
@@ -45,7 +49,7 @@ class BaseTrainer(object):
         task_loss, reward = self.task_loss_reward(overall_feat, tgt, done)
         return feat, task_loss, reward, done, (log_prob, state_value, action)
 
-    def expand_episode(self, dataset, feat, frame, tgt, misc):
+    def expand_episode(self, dataset, feat, frame, tgt):
         # use a [B, N, C, H, W] to record all the feats, input feat is at index 0
         first_feat = feat
         B, _, C, H, W = feat.shape
@@ -54,9 +58,8 @@ class BaseTrainer(object):
         feat[:, 0, :, :, :] = first_feat
 
         loss = []
-        action_sum, return_avg = misc
         # consider all cameras as initial one
-        log_probs, values, actions, entropies, rewards = [], [], [], [], []
+        log_probs, values, actions, rewards = [], [], [], []
         task_loss_s = []
 
         # indicator whether episode ends, and a counter
@@ -77,30 +80,34 @@ class BaseTrainer(object):
             # increament the counter
             steps += 1
 
-        log_probs, values, actions, entropies, rewards = torch.stack(log_probs), torch.stack(values), \
-            torch.stack(actions), torch.stack(entropies), torch.stack(rewards)
+        log_probs, values, actions, rewards = torch.stack(log_probs), torch.cat(values), \
+            np.stack(actions), torch.stack(rewards)
         task_loss_s = torch.stack(task_loss_s)
 
         # calculate returns for each step in episode
+        # the batch size is always 1
         R = torch.zeros([B]).cuda()
-        returns = torch.empty([steps, B]).cuda().float()
+        returns = torch.empty([steps, B]).float().cuda()
         for i in reversed(range(steps)):
             R = rewards[i] + self.args.gamma * R
             returns[i] = R
-        
+
+        # average return value
+        return_avg = returns.mean(1)
+
         # policy & value loss
         # value_loss = value_loss_s.mean()
         value_loss = F.smooth_l1_loss(values, returns)
         policy_loss = (-log_probs * (returns - values.detach())).mean()
 
         # task loss
-        task_loss = task_loss_s[-1]
+        # task_loss = task_loss_s[-1]
         # loss.append(value_loss + policy_loss + task_loss -
         #             entropies.mean() * self.args.beta_entropy * eps_thres)
 
         loss = value_loss + policy_loss
 
-        return loss, (action_sum, return_avg, value_loss)
+        return loss, (return_avg, value_loss, policy_loss), (feat, actions)
 
     def task_loss_reward(self, overall_feat, tgt, step):
         raise NotImplementedError
@@ -119,11 +126,10 @@ class PerspectiveTrainer(BaseTrainer):
     def train(self, epoch, dataloader, optimizer, scheduler=None, log_interval=100):
         self.model.train()
         if self.args.base_lr_ratio == 0:
+            # fix batch_norm in the backbone when lr is 0
             self.model.base.eval()
         losses = 0
         t0 = time.time()
-        action_sum = torch.zeros([dataloader.dataset.num_cam]).cuda()
-        return_avg = None
         for batch_idx, (imgs, aug_mats, proj_mats, world_gt, imgs_gt, frame) in enumerate(dataloader):
             B, N = imgs.shape[:2]
             for key in imgs_gt.keys():
@@ -132,8 +138,9 @@ class PerspectiveTrainer(BaseTrainer):
                 self.model.get_feat(imgs.cuda(), aug_mats, proj_mats, self.args.down)
             if self.args.interactive:
                 # feat is only from the first cam
-                loss, (action_sum, return_avg, value_loss) = \
-                    self.expand_episode(dataloader.dataset, feat, frame, world_gt['heatmap'], (action_sum, return_avg))
+                # TODO: do we need to pass the dataset to the function
+                loss, (return_avg, value_loss, policy_loss), _ = \
+                    self.expand_episode(dataloader.dataset, feat, frame, world_gt['heatmap'])
             else:
                 overall_feat = feat.mean(dim=1) if self.model.aggregation == 'mean' else feat.max(dim=1)[0]
                 world_heatmap, world_offset = self.model.get_output(overall_feat)
@@ -147,10 +154,11 @@ class PerspectiveTrainer(BaseTrainer):
 
                 w_loss = loss_w_hm + loss_w_off  # + self.args.id_ratio * loss_w_id
                 img_loss = loss_img_hm + loss_img_off + loss_img_wh * 0.1  # + self.args.id_ratio * loss_img_id
-                loss = w_loss + img_loss / N * self.args.alpha
                 if self.args.use_mse:
                     loss = F.mse_loss(world_heatmap, world_gt['heatmap'].to(world_heatmap.device)) + \
                            self.args.alpha * F.mse_loss(imgs_heatmap, imgs_gt['heatmap'].to(imgs_heatmap.device)) / N
+                else:
+                    loss = w_loss + img_loss / N * self.args.alpha
 
             optimizer.zero_grad()
             loss.backward()
@@ -172,123 +180,61 @@ class PerspectiveTrainer(BaseTrainer):
                 print(f'Train epoch: {epoch}, batch:{(batch_idx + 1)}, '
                       f'loss: {losses / (batch_idx + 1):.3f}, time: {t_epoch:.1f}')
                 if self.args.interactive:
-                    print(f'value loss: {value_loss:.3f}, return: {return_avg[-1]:.2f}')
-                    # print(f'value loss: {value_loss:.3f}, policy loss: {policy_loss:.3f}, '
-                    #       f'return: {return_avg[-1]:.2f}, entropy: {entropies.mean():.3f}')
-                    print(' '.join('cam {} {:.2f} |'.format(cam, freq) for cam, freq in
-                                   zip(range(N), F.normalize(action_sum, p=1, dim=0).cpu())))
+                    print(f'value loss: {value_loss:.3f}, policy loss: {policy_loss:.3f}, '
+                          f'return: {return_avg[-1]:.3f}')
                 pass
         return losses / len(dataloader), None
 
-    def test(self, dataloader, init_cam=None):
+    def test(self, dataloader):
         t0 = time.time()
         self.model.eval()
-        K = len(init_cam) if init_cam is not None else 1
-        losses = torch.zeros([K])
-        modas, modps, precs, recalls = torch.zeros([K]), torch.zeros([K]), torch.zeros([K]), torch.zeros([K])
-        res_list = [[] for _ in range(K)]
-        action_sum = torch.zeros([K, dataloader.dataset.num_cam]).cuda()
+        losses = 0.0
+        res_list = []
         for batch_idx, (imgs, aug_mats, proj_mats, world_gt, imgs_gt, frame) in enumerate(dataloader):
             B, N = imgs_gt['heatmap'].shape[:2]
-            world_heatmaps, world_offsets, actions = [], [], []
             with torch.no_grad():
-                if not self.args.interactive or init_cam is None:
+                if not self.args.interactive:
+                    # non interactive mode
                     (world_heatmap, world_offset), _ = \
                         self.model(imgs.cuda(), aug_mats, proj_mats, self.args.down)
-                    world_heatmaps.append(world_heatmap)
-                    world_offsets.append(world_offset)
-                    actions.append(None)
+                    if self.args.use_mse:
+                        loss = F.mse_loss(world_heatmap, world_gt['heatmap'].cuda())
+                    else:
+                        loss = focal_loss(world_heatmap, world_gt['heatmap'])
                 else:
+                    # interactive mode, initial feat
                     feat, _ = self.model.get_feat(imgs.cuda(), aug_mats, self.args.down)
-                    # K, B, N
-                    for k in range(K):
-                        overall_feat, (_, _, action, _) = \
-                            self.model.do_steps(feat, init_cam[k].repeat([B, 1]), self.args.steps)
-                        world_heatmap, world_offset = self.model.get_output(overall_feat)
-                        world_heatmaps.append(world_heatmap)
-                        world_offsets.append(world_offset)
-                        actions.append(action)
-            for k in range(K):
-                loss = focal_loss(world_heatmaps[k], world_gt['heatmap'])
-                if self.args.use_mse:
-                    loss = F.mse_loss(world_heatmaps[k], world_gt['heatmap'].cuda())
-                if init_cam is not None:
-                    # record actions
-                    action_sum[k] += torch.cat(actions[k]).sum(dim=0)
-                losses[k] += loss.item()
 
-                xys = mvdet_decode(torch.sigmoid(world_heatmaps[k]), world_offsets[k],
-                                   reduce=dataloader.dataset.world_reduce).cpu()
-                grid_xy, scores = xys[:, :, :2], xys[:, :, 2:3]
-                if dataloader.dataset.base.indexing == 'xy':
-                    positions = grid_xy
-                else:
-                    positions = grid_xy[:, :, [1, 0]]
-                for b in range(B):
-                    ids = scores[b].squeeze() > self.args.cls_thres
-                    pos, s = positions[b, ids], scores[b, ids, 0]
-                    ids, count = nms(pos, s, 20, np.inf)
-                    res = torch.cat([torch.ones([count, 1]) * frame[b], pos[ids[:count]]], dim=1)
-                    res_list[k].append(res)
+                    # provide the initial feat, expand episode to get new feat and actions
+                    loss, (return_avg, _, _), (feat, actions) = \
+                        self.expand_episode(dataloader.dataset, feat, frame, world_gt['heatmap'])
 
-        for k in range(K):
-            if init_cam is not None:
-                print(f'init camera {init_cam[k].nonzero()[0].item()}: MVSelect')
-                idx = action_sum[k].nonzero().cpu()[:, 0]
-                print(' '.join('cam {} {:.2f} |'.format(cam, freq) for cam, freq in
-                               zip(idx, F.normalize(action_sum[k], p=1, dim=0).cpu()[idx])))
+                    overall_feat = feat.mean(dim=1) if self.model.aggregation == 'mean' else feat.max(dim=1)[0]
+                    world_heatmap, world_offset = self.model.get_output(overall_feat)
+            # append current loss
+            losses += loss.item()
 
-            res = torch.cat(res_list[k], dim=0).numpy() if res_list[k] else np.empty([0, 3])
-            # np.savetxt(f'{self.logdir}/test.txt', res, '%d')
-            moda, modp, precision, recall, stats = evaluateDetection_py(res,
-                                                                        dataloader.dataset.gt_array,
-                                                                        dataloader.dataset.frames)
-            print(f'Test, loss: {losses[k] / len(dataloader):.6f}, moda: {moda:.1f}%, modp: {modp:.1f}%, '
-                  f'prec: {precision:.1f}%, recall: {recall:.1f}%' +
-                  ('' if init_cam is not None else f', time: {time.time() - t0:.1f}s'))
-            modas[k], modps[k], precs[k], recalls[k] = moda, modp, precision, recall
+            xys = mvdet_decode(torch.sigmoid(world_heatmap), world_offset,
+                                reduce=dataloader.dataset.world_reduce).cpu()
+            grid_xy, scores = xys[:, :, :2], xys[:, :, 2:3]
+            if dataloader.dataset.base.indexing == 'xy':
+                positions = grid_xy
+            else:
+                positions = grid_xy[:, :, [1, 0]]
+            for b in range(B):
+                ids = scores[b].squeeze() > self.args.cls_thres
+                pos, s = positions[b, ids], scores[b, ids, 0]
+                ids, count = nms(pos, s, 20, np.inf)
+                res = torch.cat([torch.ones([count, 1]) * frame[b], pos[ids[:count]]], dim=1)
+                res_list.append(res)
 
-        if init_cam is not None:
-            print('*************************************')
-            print(f'MVSelect average moda {modas.mean():.1f}±{modas.std():.1f}%, '
-                  f'modp {modps.mean():.1f}±{modps.std():.1f}%, '
-                  f'prec {precs.mean():.1f}±{precs.std():.1f}%, '
-                  f'recall {recalls.mean():.1f}±{recalls.std():.1f}%, '
-                  f'time: {time.time() - t0:.1f}')
-            print('*************************************')
-        return losses.mean() / len(dataloader), [modas.mean(), modps.mean(), precs.mean(), recalls.mean(), ]
+        # stack all results from all frames together
+        res = torch.cat(res_list, dim=0).numpy() if res_list else np.empty([0, 3])
+        moda, modp, precision, recall, stats = evaluateDetection_py(res,
+                                                                    dataloader.dataset.gt_array,
+                                                                    dataloader.dataset.frames)
+        print(f'Test, loss: {losses / len(dataloader):.6f}, moda: {moda:.1f}%, modp: {modp:.1f}%, '
+                f'prec: {precision:.1f}%, recall: {recall:.1f}%'
+                f', time: {time.time() - t0:.1f}s')
 
-
-def find_instance_lvl_strategy(rewards, combinations):
-    K, L = rewards.shape
-    K, N = combinations.shape
-    strategy = np.zeros([N, L], dtype=int)
-    for init_cam in range(N):
-        indices = np.nonzero(combinations[:, init_cam] == 1)[0]
-        best_idx = np.argmax(rewards[indices], axis=0)
-        strategy[init_cam] = indices[best_idx]
-    return strategy
-
-
-def find_dataset_lvl_strategy(rewards, combinations):
-    K = rewards.shape
-    K, N = combinations.shape
-    strategy = np.zeros([N], dtype=int)
-    for init_cam in range(N):
-        indices = np.nonzero(combinations[:, init_cam] == 1)[0]
-        best_idx = np.argmax(rewards[indices])
-        strategy[init_cam] = indices[best_idx]
-    return strategy
-
-
-def find_area_strategy(coverage, combinations):
-    K, _, _, _ = coverage.shape
-    K, N = combinations.shape
-    mv_coverage = (torch.tensor(combinations)[:, :, None, None, None] *
-                   coverage[None]).max(dim=1)[0].mean(dim=[1, 2, 3])
-    strategy = np.zeros([N], dtype=int)
-    for init_cam in range(N):
-        indices = np.nonzero(combinations[:, init_cam] == 1)[0]
-        best_idx = np.argmax(mv_coverage[indices])
-        strategy[init_cam] = indices[best_idx]
-    return strategy
+        return losses / len(dataloader), [moda, modp, precision, recall, ]
