@@ -187,7 +187,7 @@ def main(args):
         # trainer.test(test_loader)
         for epoch in tqdm.tqdm(range(1, args.epochs + 1)):
             print('Training...')
-            train_loss, train_prec = trainer.train(epoch, train_loader, optimizer, scheduler)
+            train_loss, train_prec = trainer.train(epoch, train_loader, optimizer, scheduler, log_interval=args.log_interval)
             if epoch % max(args.epochs // 10, 1) == 0:
                 print('Testing...')
                 test_loss, test_prec = trainer.test(test_loader)
@@ -232,6 +232,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=None, help='random seed')
     parser.add_argument('--carla_seed', type=int, default=2023, help='random seed for CarlaX')
     parser.add_argument('--deterministic', type=str2bool, default=False)
+    parser.add_argument('--log_interval', type=int, default=100)
     # MVcontrol settings
     parser.add_argument('--interactive', type=str2bool, default=False)
     parser.add_argument('--gamma', type=float, default=0.99, help='reward discount factor (default: 0.99)')

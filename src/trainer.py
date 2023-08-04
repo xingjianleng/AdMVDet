@@ -138,7 +138,6 @@ class PerspectiveTrainer(BaseTrainer):
                 self.model.get_feat(imgs.cuda(), aug_mats, proj_mats, self.args.down)
             if self.args.interactive:
                 # feat is only from the first cam
-                # TODO: do we need to pass the dataset to the function
                 loss, (return_avg, value_loss, policy_loss), _ = \
                     self.expand_episode(dataloader.dataset, feat, frame, world_gt['heatmap'])
             else:
@@ -182,7 +181,11 @@ class PerspectiveTrainer(BaseTrainer):
                 if self.args.interactive:
                     print(f'value loss: {value_loss:.3f}, policy loss: {policy_loss:.3f}, '
                           f'return: {return_avg[-1]:.3f}')
-                pass
+                # log the learning rate in each epoch
+                print(f"lr: {optimizer.param_groups[0]['lr']}; "
+                    f"other_lr: {optimizer.param_groups[1]['lr']}; "
+                    f"control_lr: {optimizer.param_groups[2]['lr']};"
+                )
         return losses / len(dataloader), None
 
     def test(self, dataloader):
