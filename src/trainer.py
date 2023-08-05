@@ -2,6 +2,7 @@ import itertools
 import random
 import time
 import copy
+import json
 import os
 import numpy as np
 import torch
@@ -124,6 +125,22 @@ class PerspectiveTrainer(BaseTrainer):
         return task_loss, reward
 
     def train(self, epoch, dataloader, optimizer, scheduler=None, log_interval=100):
+        # make the directory for saving coverage_maps for the current epoch
+        if self.args.interactive:
+            coverage_path = os.path.join(self.logdir, "coverage_maps", f"epoch_{epoch}")
+            if not os.path.exists(coverage_path):
+                os.makedirs(coverage_path)
+            cam_configs_path = os.path.join(self.logdir, "cam_configs", f"epoch_{epoch}")
+            if not os.path.exists(cam_configs_path):
+                os.makedirs(cam_configs_path)
+        else:
+            coverage_path = os.path.join(self.logdir, "coverage.jpg")
+        # make the directory for saving feature_maps for the current epoch
+        feature_map_path = os.path.join(self.logdir, "feature_maps", f"epoch_{epoch}")
+        if not os.path.exists(feature_map_path):
+            os.makedirs(feature_map_path)
+        
+        # set model mode
         self.model.train()
         if self.args.base_lr_ratio == 0:
             # fix batch_norm in the backbone when lr is 0
@@ -138,9 +155,15 @@ class PerspectiveTrainer(BaseTrainer):
                 self.model.get_feat(imgs.cuda(), aug_mats, proj_mats, self.args.down)
             if self.args.interactive:
                 # feat is only from the first cam
-                loss, (return_avg, value_loss, policy_loss), _ = \
+                loss, (return_avg, value_loss, policy_loss), (feat, action) = \
                     self.expand_episode(dataloader.dataset, feat, frame, world_gt['heatmap'])
+                overall_feat = feat.mean(dim=1) if self.model.aggregation == 'mean' else feat.max(dim=1)[0]
             else:
+                # in non-interactive mode, save the initial camera coverage if it doesn't exist
+                if not os.path.exists(coverage_path):
+                    plt.imsave(coverage_path,
+                        dataloader.dataset.Rworld_coverage.max(dim=0)[0].squeeze())
+
                 overall_feat = feat.mean(dim=1) if self.model.aggregation == 'mean' else feat.max(dim=1)[0]
                 world_heatmap, world_offset = self.model.get_output(overall_feat)
                 loss_w_hm = focal_loss(world_heatmap, world_gt['heatmap'])
@@ -178,14 +201,26 @@ class PerspectiveTrainer(BaseTrainer):
                 t_epoch = t1 - t0
                 print(f'Train epoch: {epoch}, batch:{(batch_idx + 1)}, '
                       f'loss: {losses / (batch_idx + 1):.3f}, time: {t_epoch:.1f}')
-                if self.args.interactive:
-                    print(f'value loss: {value_loss:.3f}, policy loss: {policy_loss:.3f}, '
-                          f'return: {return_avg[-1]:.3f}')
                 # log the learning rate in each epoch
                 print(f"lr: {optimizer.param_groups[0]['lr']}; "
                     f"other_lr: {optimizer.param_groups[1]['lr']}; "
-                    f"control_lr: {optimizer.param_groups[2]['lr']};"
-                )
+                    f"control_lr: {optimizer.param_groups[2]['lr']};")
+                
+                # save feature map as images for logs
+                plt.imsave(os.path.join(feature_map_path, f"{batch_idx + 1}.jpg"),
+                           torch.norm(overall_feat[0].detach(), dim=0).cpu().numpy())
+
+                if self.args.interactive:
+                    print(f'value loss: {value_loss:.3f}, policy loss: {policy_loss:.3f}, '
+                          f'return: {return_avg[-1]:.3f}')
+                    # log camera positions & directions
+                    with open(os.path.join(cam_configs_path, f"{batch_idx + 1}.json"), "w") as fp:
+                        json.dump(dataloader.dataset.base.env.camera_configs, fp, indent=4)
+                    # print world coverage for debug
+                    world_coverage = dataloader.dataset.Rworld_coverage.max(dim=0)[0]
+                    print(f'World coverage: {world_coverage.mean(-1).mean(-1).item()}')
+                    # save the world_coverage map as images for logs
+                    plt.imsave(os.path.join(coverage_path, f"{batch_idx + 1}.jpg"), world_coverage.squeeze())
         return losses / len(dataloader), None
 
     def test(self, dataloader):
