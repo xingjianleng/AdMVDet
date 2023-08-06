@@ -47,7 +47,7 @@ class BaseTrainer(object):
 
         # aggregate new feature, calculate loss and reward
         overall_feat = feat.mean(dim=1) if self.model.aggregation == 'mean' else feat.max(dim=1)[0]
-        task_loss, reward = self.task_loss_reward(overall_feat, tgt, done)
+        task_loss, reward = self.task_loss_reward(dataset, frame, overall_feat, tgt, done)
         return feat, task_loss, reward, done, (log_prob, state_value, action)
 
     def expand_episode(self, dataset, feat, frame, tgt):
@@ -110,7 +110,7 @@ class BaseTrainer(object):
 
         return loss, (return_avg, value_loss, policy_loss), (feat, actions)
 
-    def task_loss_reward(self, overall_feat, tgt, step):
+    def task_loss_reward(self, dataset, frame, overall_feat, tgt, step):
         raise NotImplementedError
 
 
@@ -118,10 +118,37 @@ class PerspectiveTrainer(BaseTrainer):
     def __init__(self, model, logdir, args, ):
         super(PerspectiveTrainer, self).__init__(model, logdir, args, )
 
-    def task_loss_reward(self, overall_feat, tgt, done):
+    def task_loss_reward(self, dataset, frame, overall_feat, tgt, done):
         world_heatmap, world_offset = self.model.get_output(overall_feat)
         task_loss = focal_loss(world_heatmap, tgt, reduction='none')
-        reward = torch.zeros_like(task_loss).cuda() if not done else -task_loss.detach()
+        # reward is only given to the last action in one episode, all other actions get a 0
+        if self.args.reward == "loss":
+            # option 1: use (-task_loss) as the reward
+            reward = torch.zeros_like(task_loss).cuda() if not done else -task_loss.detach()
+        elif self.args.reward == "coverage":
+            # option 2: use (coverage) as the reward
+            # TODO: try using the increment of world_coverage as reward
+            world_coverage = dataset.Rworld_coverage.max(dim=0)[0].mean(-1).mean(-1)
+            reward = torch.zeros_like(task_loss).cuda() if not done else world_coverage.cuda()
+        elif self.args.reward == "moda":
+            # option 3: use (MODA) as the reward
+            xys = mvdet_decode(torch.sigmoid(world_heatmap), world_offset,
+                                reduce=dataset.world_reduce).cpu()
+            grid_xy, scores = xys[:, :, :2], xys[:, :, 2:3]
+            if dataset.base.indexing == 'xy':
+                positions = grid_xy
+            else:
+                positions = grid_xy[:, :, [1, 0]]
+            for b in range(world_heatmap.shape[0]):
+                ids = scores[b].squeeze() > self.args.cls_thres
+                pos, s = positions[b, ids], scores[b, ids, 0]
+                ids, count = nms(pos, s, 20, np.inf)
+                res = torch.cat([torch.ones([count, 1]) * frame[b], pos[ids[:count]]], dim=1)
+            # only evaluate stats for the current frame
+            moda, modp, precision, recall, stats = evaluateDetection_py(res, dataset.gt_array)
+            reward = torch.zeros_like(task_loss).cuda() if not done else torch.tensor([moda]).cuda()
+        else:
+            raise NotImplementedError("Reward type not implemented")
         return task_loss, reward
 
     def train(self, epoch, dataloader, optimizer, scheduler=None, log_interval=100):

@@ -121,7 +121,7 @@ def main(args):
     lr_settings = f'base{args.base_lr_ratio}other{args.other_lr_ratio}' + \
                   f'control{args.control_lr}' if args.interactive else ''
     logdir = f'logs/{args.dataset}/{"DEBUG_" if is_debug else ""}{args.arch}_{args.aggregation}_down{args.down}_' \
-             f'{"RL_" if args.interactive else ""}' \
+             f'{f"RL_reward{args.reward}_" if args.interactive else ""}' \
              f'lr{args.lr}{lr_settings}_b{args.batch_size}_e{args.epochs}_' \
              f'{datetime.datetime.today():%Y-%m-%d_%H-%M-%S}' if not args.eval \
         else f'logs/{args.dataset}/EVAL_{args.resume}'
@@ -235,6 +235,7 @@ if __name__ == '__main__':
     parser.add_argument('--log_interval', type=int, default=100)
     # MVcontrol settings
     parser.add_argument('--interactive', type=str2bool, default=False)
+    parser.add_argument('--reward', type=str, help='type of reward used', choices=['loss', 'coverage', 'moda'])
     parser.add_argument('--gamma', type=float, default=0.99, help='reward discount factor (default: 0.99)')
     parser.add_argument('--down', type=int, default=1, help='down sample the image to 1/N size')
     # multiview detection specific settings
