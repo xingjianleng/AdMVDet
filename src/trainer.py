@@ -243,6 +243,8 @@ class PerspectiveTrainer(BaseTrainer):
                     # log camera positions & directions
                     with open(os.path.join(cam_configs_path, f"{batch_idx + 1}.json"), "w") as fp:
                         json.dump(dataloader.dataset.base.env.camera_configs, fp, indent=4)
+                    # log the variance parameter in the control module
+                    print(f'std of control module: {torch.exp(self.model.control_module.log_std).detach().cpu().numpy()}')
                     # print world coverage for debug
                     world_coverage = dataloader.dataset.Rworld_coverage.max(dim=0)[0]
                     print(f'World coverage: {world_coverage.mean(-1).mean(-1).item()}')
