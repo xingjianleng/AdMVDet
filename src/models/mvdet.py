@@ -68,14 +68,8 @@ class MVDet(MultiviewBase):
 
         # only activate the control module for CarlaX dataset
         if dataset.base.__name__ == "CarlaX" and dataset.interactive:
-            all_actions = ['x', 'y', 'z', 'pitch', 'yaw', 'roll', 'fov']
-            indices = []
-            for action_name in dataset.base.env.opts["env_action_space"].split("-"):
-                indices.append(all_actions.index(action_name))
-            action_space = dataset.base.env.action_space
-            action_min = action_space.low[indices]
-            action_max = action_space.high[indices]
-            self.control_module = CamControl((action_min, action_max), hidden_dim, 3, aggregation)
+            action_dim = len(dataset.base.env.opts["env_action_space"].split("-"))
+            self.control_module = CamControl(action_dim, hidden_dim, 3, aggregation)
 
         # world heads
         self.world_heatmap = output_head(hidden_dim, outfeat_dim, 1)

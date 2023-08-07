@@ -156,6 +156,8 @@ class CarlaCameraSeqEnv(gym.Env):
             if 'yaw' == action_name: rtn_action[4] = value
             if 'roll' == action_name: rtn_action[5] = value
             if 'fov' == action_name: rtn_action[6] = value
+        # clip action to corresponding range
+        rtn_action = np.clip(rtn_action, self.action_space.low, self.action_space.high)
         return rtn_action
     
     def encode_camera_cfg(self, cfg):
