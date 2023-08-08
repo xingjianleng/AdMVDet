@@ -119,7 +119,7 @@ def main(args):
 
     # logging
     lr_settings = f'base{args.base_lr_ratio}other{args.other_lr_ratio}' + \
-                  f'control{args.control_lr}' if args.interactive else ''
+                  f'control{args.control_lr}vfratio{args.vf_ratio}' if args.interactive else ''
     logdir = f'logs/{args.dataset}/{"DEBUG_" if is_debug else ""}{args.arch}_{args.aggregation}_down{args.down}_' \
              f'{f"RL_reward{args.reward}_" if args.interactive else ""}' \
              f'lr{args.lr}{lr_settings}_b{args.batch_size}_e{args.epochs}_' \
@@ -226,6 +226,7 @@ if __name__ == '__main__':
     parser.add_argument('--control_lr', type=float, default=None, help='learning rate for MVcontrol')
     parser.add_argument('--base_lr_ratio', type=float, default=1.0)
     parser.add_argument('--other_lr_ratio', type=float, default=1.0)
+    parser.add_argument('--vf_ratio', type=float, default=0.5, help='value loss ratio')
     parser.add_argument('--weight_decay', type=float, default=1e-4)
     parser.add_argument('--resume', type=str, default=None)
     parser.add_argument('--visualize', action='store_true')
@@ -235,7 +236,7 @@ if __name__ == '__main__':
     parser.add_argument('--log_interval', type=int, default=100)
     # MVcontrol settings
     parser.add_argument('--interactive', type=str2bool, default=False)
-    parser.add_argument('--reward', type=str, help='type of reward used', choices=['loss', 'coverage', 'moda'])
+    parser.add_argument('--reward', type=str, help='type of reward used', choices=['loss', 'cover_sum', 'cover_mean', 'moda'])
     parser.add_argument('--gamma', type=float, default=0.99, help='reward discount factor (default: 0.99)')
     parser.add_argument('--down', type=int, default=1, help='down sample the image to 1/N size')
     # multiview detection specific settings

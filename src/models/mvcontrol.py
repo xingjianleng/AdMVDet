@@ -34,7 +34,7 @@ class CamControl(nn.Module):
         overall_feat = self.feat(overall_feat).amax(dim=[2, 3])
         overall_feat = self.fc(overall_feat)
 
-        action_mean = self.action_head(overall_feat)
+        action_mean = torch.sigmoid(self.action_head(overall_feat))
         state_value = self.value_head(overall_feat)
         action_std = torch.exp(self.log_std)
 

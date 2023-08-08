@@ -50,7 +50,7 @@ class BaseTrainer(object):
         task_loss, reward = self.task_loss_reward(dataset, frame, overall_feat, tgt, done)
         return feat, task_loss, reward, done, (log_prob, state_value, action)
 
-    def expand_episode(self, dataset, feat, frame, tgt):
+    def expand_episode(self, dataset, feat, frame, tgt, return_avg):
         # use a [B, N, C, H, W] to record all the feats, input feat is at index 0
         first_feat = feat
         B, _, C, H, W = feat.shape
@@ -94,7 +94,7 @@ class BaseTrainer(object):
             returns[i] = R
 
         # average return value
-        return_avg = returns.mean(1)
+        return_avg = returns.mean(1) if return_avg is None else returns.mean(1) * 0.05 + return_avg * 0.95
 
         # policy & value loss
         # value_loss = value_loss_s.mean()
@@ -106,7 +106,7 @@ class BaseTrainer(object):
         # loss.append(value_loss + policy_loss + task_loss -
         #             entropies.mean() * self.args.beta_entropy * eps_thres)
 
-        loss = value_loss + policy_loss
+        loss = value_loss * self.args.vf_ratio + policy_loss
 
         return loss, (return_avg, value_loss, policy_loss), (feat, actions)
 
@@ -125,10 +125,13 @@ class PerspectiveTrainer(BaseTrainer):
         if self.args.reward == "loss":
             # option 1: use (-task_loss) as the reward
             reward = torch.zeros_like(task_loss).cuda() if not done else -task_loss.detach()
-        elif self.args.reward == "coverage":
+        elif self.args.reward == "cover_sum":
             # option 2: use (coverage) as the reward
             # TODO: try using the increment of world_coverage as reward
             world_coverage = dataset.Rworld_coverage.max(dim=0)[0].mean(-1).mean(-1)
+            reward = torch.zeros_like(task_loss).cuda() if not done else world_coverage.cuda()
+        elif self.args.reward == "cover_mean":
+            world_coverage = dataset.Rworld_coverage.mean(dim=0).mean(-1).mean(-1)
             reward = torch.zeros_like(task_loss).cuda() if not done else world_coverage.cuda()
         elif self.args.reward == "moda":
             # option 3: use (MODA) as the reward
@@ -173,6 +176,7 @@ class PerspectiveTrainer(BaseTrainer):
             # fix batch_norm in the backbone when lr is 0
             self.model.base.eval()
         losses = 0
+        return_avg = None
         t0 = time.time()
         for batch_idx, (imgs, aug_mats, proj_mats, world_gt, imgs_gt, frame) in enumerate(dataloader):
             B, N = imgs.shape[:2]
@@ -183,7 +187,7 @@ class PerspectiveTrainer(BaseTrainer):
             if self.args.interactive:
                 # feat is only from the first cam
                 loss, (return_avg, value_loss, policy_loss), (feat, action) = \
-                    self.expand_episode(dataloader.dataset, feat, frame, world_gt['heatmap'])
+                    self.expand_episode(dataloader.dataset, feat, frame, world_gt['heatmap'], return_avg)
                 overall_feat = feat.mean(dim=1) if self.model.aggregation == 'mean' else feat.max(dim=1)[0]
             else:
                 # in non-interactive mode, save the initial camera coverage if it doesn't exist
@@ -246,16 +250,20 @@ class PerspectiveTrainer(BaseTrainer):
                     # log the variance parameter in the control module
                     print(f'std of control module: {torch.exp(self.model.control_module.log_std).detach().cpu().numpy()}')
                     # print world coverage for debug
-                    world_coverage = dataloader.dataset.Rworld_coverage.max(dim=0)[0]
-                    print(f'World coverage: {world_coverage.mean(-1).mean(-1).item()}')
+                    world_coverage = dataloader.dataset.Rworld_coverage
+                    print(f'World coverage (max): {world_coverage.max(dim=0)[0].mean(-1).mean(-1).item()}')
                     # save the world_coverage map as images for logs
-                    plt.imsave(os.path.join(coverage_path, f"{batch_idx + 1}.jpg"), world_coverage.squeeze())
+                    plt.imsave(os.path.join(coverage_path, f"{batch_idx + 1}_max.jpg"), world_coverage.max(dim=0)[0].squeeze())
+                    print(f'World coverage (mean): {world_coverage.mean(dim=0).mean(-1).mean(-1).item()}')
+                    # save the world_coverage map as images for logs
+                    plt.imsave(os.path.join(coverage_path, f"{batch_idx + 1}_mean.jpg"), world_coverage.mean(dim=0).squeeze())
         return losses / len(dataloader), None
 
     def test(self, dataloader):
         t0 = time.time()
         self.model.eval()
         losses = 0.0
+        return_avg = None
         res_list = []
         for batch_idx, (imgs, aug_mats, proj_mats, world_gt, imgs_gt, frame) in enumerate(dataloader):
             B, N = imgs_gt['heatmap'].shape[:2]
@@ -274,7 +282,7 @@ class PerspectiveTrainer(BaseTrainer):
 
                     # provide the initial feat, expand episode to get new feat and actions
                     loss, (return_avg, _, _), (feat, actions) = \
-                        self.expand_episode(dataloader.dataset, feat, frame, world_gt['heatmap'])
+                        self.expand_episode(dataloader.dataset, feat, frame, world_gt['heatmap'], return_avg)
 
                     overall_feat = feat.mean(dim=1) if self.model.aggregation == 'mean' else feat.max(dim=1)[0]
                     world_heatmap, world_offset = self.model.get_output(overall_feat)
@@ -303,5 +311,10 @@ class PerspectiveTrainer(BaseTrainer):
         print(f'Test, loss: {losses / len(dataloader):.6f}, moda: {moda:.1f}%, modp: {modp:.1f}%, '
                 f'prec: {precision:.1f}%, recall: {recall:.1f}%'
                 f', time: {time.time() - t0:.1f}s')
+        if self.args.interactive:
+            # losses & print world coverage for debug
+            world_coverage = dataloader.dataset.Rworld_coverage.max(dim=0)[0]
+            print(f'return: {return_avg[-1]:.3f}'
+                f'World coverage: {world_coverage.mean(-1).mean(-1).item()}')
 
         return losses / len(dataloader), [moda, modp, precision, recall, ]
