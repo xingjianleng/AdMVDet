@@ -255,6 +255,8 @@ class frameDataset(VisionDataset):
             world_masks = torch.ones([self.num_cam, 1] + self.worldgrid_shape)
             self.imgs_region = warp_perspective(world_masks, torch.inverse(self.proj_mats), self.img_shape, 'nearest')
             img_masks = torch.ones([self.num_cam, 1, self.base.img_shape[0], self.base.img_shape[1]])
+            # TODO: check that for the first frame, all cameras are at expert view
+            # the coverage map could be perfect; should only consider active cameras for coverage map
             self.Rworld_coverage = warp_perspective(img_masks, self.proj_mats, self.Rworld_shape)
 
             frame = self.frames[index]
@@ -332,7 +334,6 @@ class frameDataset(VisionDataset):
             img_gt = get_centernet_gt(self.Rimg_shape, img_x_s, img_y_s, cam_img_pids, img_w_s, img_h_s,
                                       reduce=self.img_reduce, top_k=self.top_k, kernel_size=self.img_kernel_size)
             aug_imgs_gt.append(img_gt)
-            # TODO: check the difference between different dataloader iteration
             if visualize:
                 plt_visualize()
 

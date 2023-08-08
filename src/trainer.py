@@ -1,5 +1,6 @@
 import itertools
 import random
+from collections import deque
 import time
 import copy
 import json
@@ -18,12 +19,28 @@ from src.utils.meters import AverageMeter
 from src.utils.image_utils import add_heatmap_to_image, img_color_denormalize
 
 
+class RolloutBuffer:
+    def __init__(self, maxlen=500):
+        self.maxlen = maxlen
+        self.clear()
+    
+    def clear(self):
+        self.actions = deque(maxlen=self.maxlen)
+        self.states = deque(maxlen=self.maxlen)
+        self.logprobs = deque(maxlen=self.maxlen)
+        self.rewards = deque(maxlen=self.maxlen)
+        self.state_values = deque(maxlen=self.maxlen)
+        self.is_terminals = deque(maxlen=self.maxlen)
+
+
 class BaseTrainer(object):
     def __init__(self, model, logdir, args, ):
         self.model = model
         self.args = args
         self.logdir = logdir
         self.denormalize = img_color_denormalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+        # replay buffer
+        self.buffer = RolloutBuffer(maxlen=args.buffer_size)
 
     def rollout(self, dataset, step, frame, feat, tgt):
         # feat: [B, N, C, H, W]
@@ -47,7 +64,7 @@ class BaseTrainer(object):
 
         # aggregate new feature, calculate loss and reward
         overall_feat = feat.mean(dim=1) if self.model.aggregation == 'mean' else feat.max(dim=1)[0]
-        task_loss, reward = self.task_loss_reward(dataset, frame, overall_feat, tgt, done)
+        task_loss, reward = self.task_loss_reward(dataset, frame, overall_feat, tgt)
         return feat, task_loss, reward, done, (log_prob, state_value, action)
 
     def expand_episode(self, dataset, feat, frame, tgt, return_avg):
@@ -67,6 +84,42 @@ class BaseTrainer(object):
         done = False
         steps = 0
 
+        # obtain predicion for the first feature map
+        overall_feat = feat.mean(dim=1) if self.model.aggregation == 'mean' else feat.max(dim=1)[0]
+        world_heatmap, world_offset = self.model.get_output(overall_feat)
+        task_loss = focal_loss(world_heatmap, tgt, reduction='none')
+
+        # initialize last_reward
+        if self.args.reward == "loss":
+            # option 1: use (-task_loss) as the reward
+            self.last_reward = -task_loss.detach()
+        elif self.args.reward == "cover_sum":
+            # option 2: use (coverage) as the reward
+            world_coverage = dataset.Rworld_coverage.max(dim=0)[0].mean(-1).mean(-1)
+            self.last_reward = world_coverage.cuda()
+        elif self.args.reward == "cover_mean":
+            world_coverage = dataset.Rworld_coverage.mean(dim=0).mean(-1).mean(-1)
+            self.last_reward = world_coverage.cuda()
+        elif self.args.reward == "moda":
+            # option 3: use (MODA) as the reward
+            xys = mvdet_decode(torch.sigmoid(world_heatmap), world_offset,
+                                reduce=dataset.world_reduce).cpu()
+            grid_xy, scores = xys[:, :, :2], xys[:, :, 2:3]
+            if dataset.base.indexing == 'xy':
+                positions = grid_xy
+            else:
+                positions = grid_xy[:, :, [1, 0]]
+            for b in range(world_heatmap.shape[0]):
+                ids = scores[b].squeeze() > self.args.cls_thres
+                pos, s = positions[b, ids], scores[b, ids, 0]
+                ids, count = nms(pos, s, 20, np.inf)
+                res = torch.cat([torch.ones([count, 1]) * frame[b], pos[ids[:count]]], dim=1)
+            # only evaluate stats for the current frame
+            moda, modp, precision, recall, stats = evaluateDetection_py(res, dataset.gt_array)
+            self.last_reward = torch.tensor([moda]).cuda()
+        else:
+            raise NotImplementedError("Reward type not implemented")
+
         # rollout episode
         while not done:
             feat, task_loss, reward, done, (log_prob, state_value, action) = \
@@ -84,6 +137,8 @@ class BaseTrainer(object):
         log_probs, values, actions, rewards = torch.stack(log_probs), torch.cat(values), \
             np.stack(actions), torch.stack(rewards)
         task_loss_s = torch.stack(task_loss_s)
+
+        # TODO: append current episode to the replay buffer; calculate loss from the replay buffer
 
         # calculate returns for each step in episode
         # the batch size is always 1
@@ -110,7 +165,7 @@ class BaseTrainer(object):
 
         return loss, (return_avg, value_loss, policy_loss), (feat, actions)
 
-    def task_loss_reward(self, dataset, frame, overall_feat, tgt, step):
+    def task_loss_reward(self, dataset, frame, overall_feat, tgt):
         raise NotImplementedError
 
 
@@ -118,21 +173,20 @@ class PerspectiveTrainer(BaseTrainer):
     def __init__(self, model, logdir, args, ):
         super(PerspectiveTrainer, self).__init__(model, logdir, args, )
 
-    def task_loss_reward(self, dataset, frame, overall_feat, tgt, done):
+    def task_loss_reward(self, dataset, frame, overall_feat, tgt):
         world_heatmap, world_offset = self.model.get_output(overall_feat)
         task_loss = focal_loss(world_heatmap, tgt, reduction='none')
-        # reward is only given to the last action in one episode, all other actions get a 0
+        # reward is defined as the delta value from previous reward
         if self.args.reward == "loss":
             # option 1: use (-task_loss) as the reward
-            reward = torch.zeros_like(task_loss).cuda() if not done else -task_loss.detach()
+            reward = -task_loss.detach() - self.last_reward
         elif self.args.reward == "cover_sum":
             # option 2: use (coverage) as the reward
-            # TODO: try using the increment of world_coverage as reward
             world_coverage = dataset.Rworld_coverage.max(dim=0)[0].mean(-1).mean(-1)
-            reward = torch.zeros_like(task_loss).cuda() if not done else world_coverage.cuda()
+            reward = world_coverage.cuda() - self.last_reward
         elif self.args.reward == "cover_mean":
             world_coverage = dataset.Rworld_coverage.mean(dim=0).mean(-1).mean(-1)
-            reward = torch.zeros_like(task_loss).cuda() if not done else world_coverage.cuda()
+            reward = world_coverage.cuda() - self.last_reward
         elif self.args.reward == "moda":
             # option 3: use (MODA) as the reward
             xys = mvdet_decode(torch.sigmoid(world_heatmap), world_offset,
@@ -149,9 +203,11 @@ class PerspectiveTrainer(BaseTrainer):
                 res = torch.cat([torch.ones([count, 1]) * frame[b], pos[ids[:count]]], dim=1)
             # only evaluate stats for the current frame
             moda, modp, precision, recall, stats = evaluateDetection_py(res, dataset.gt_array)
-            reward = torch.zeros_like(task_loss).cuda() if not done else torch.tensor([moda]).cuda()
+            reward = torch.tensor([moda]).cuda() - self.last_reward
         else:
             raise NotImplementedError("Reward type not implemented")
+        # set current_reward as last_reward for the next step
+        self.last_reward = reward
         return task_loss, reward
 
     def train(self, epoch, dataloader, optimizer, scheduler=None, log_interval=100):

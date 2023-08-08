@@ -119,7 +119,7 @@ def main(args):
 
     # logging
     lr_settings = f'base{args.base_lr_ratio}other{args.other_lr_ratio}' + \
-                  f'control{args.control_lr}vfratio{args.vf_ratio}' if args.interactive else ''
+                  f'control{args.control_lr}vfratio{args.vf_ratio}buffer{args.buffer_size}' if args.interactive else ''
     logdir = f'logs/{args.dataset}/{"DEBUG_" if is_debug else ""}{args.arch}_{args.aggregation}_down{args.down}_' \
              f'{f"RL_reward{args.reward}_" if args.interactive else ""}' \
              f'lr{args.lr}{lr_settings}_b{args.batch_size}_e{args.epochs}_' \
@@ -236,6 +236,7 @@ if __name__ == '__main__':
     parser.add_argument('--log_interval', type=int, default=100)
     # MVcontrol settings
     parser.add_argument('--interactive', type=str2bool, default=False)
+    parser.add_argument('--buffer_size', type=int, default=300, help='size of replay buffer')
     parser.add_argument('--reward', type=str, help='type of reward used', choices=['loss', 'cover_sum', 'cover_mean', 'moda'])
     parser.add_argument('--gamma', type=float, default=0.99, help='reward discount factor (default: 0.99)')
     parser.add_argument('--down', type=int, default=1, help='down sample the image to 1/N size')
