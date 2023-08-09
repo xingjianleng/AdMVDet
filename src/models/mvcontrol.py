@@ -29,7 +29,7 @@ class CamControl(nn.Module):
         # TODO: need way to converge log_std
         self.log_std = nn.Parameter(-4.0 * torch.ones(action_dim, dtype=torch.float32))
 
-    def forward(self, feat):
+    def forward(self, feat, randomise):
         overall_feat = feat.mean(dim=1) if self.aggregation == 'mean' else feat.max(dim=1)[0]
         overall_feat = self.feat(overall_feat).amax(dim=[2, 3])
         overall_feat = self.fc(overall_feat)
@@ -38,9 +38,14 @@ class CamControl(nn.Module):
         state_value = self.value_head(overall_feat)
         action_std = torch.exp(self.log_std)
 
-        action_dist = Normal(action_mean, action_std)
-        action = action_dist.sample()
-        log_prob = action_dist.log_prob(action)
+        # if training network, use randomised action, otherwise use the mean as action
+        if randomise:
+            action_dist = Normal(action_mean, action_std)
+            action = action_dist.sample()
+            log_prob = action_dist.log_prob(action)
+        else:
+            action = action_mean
+            log_prob = torch.log(torch.ones_like(action))
 
         # return log_prob, state_value, action, entropy
         return log_prob, state_value, action.detach().cpu().numpy()

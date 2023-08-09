@@ -42,11 +42,11 @@ class BaseTrainer(object):
         # replay buffer
         self.buffer = RolloutBuffer(maxlen=args.buffer_size)
 
-    def rollout(self, dataset, step, frame, feat, tgt):
+    def rollout(self, dataset, step, frame, feat, tgt, randomise):
         # feat: [B, N, C, H, W]
         # determine the current action based on the feat
         log_prob, state_value, action = \
-            self.model.control_module(feat)
+            self.model.control_module(feat, randomise)
         
         # squeeze from batch
         log_prob, action = log_prob.squeeze(), action.squeeze()
@@ -67,7 +67,7 @@ class BaseTrainer(object):
         task_loss, reward = self.task_loss_reward(dataset, frame, overall_feat, tgt, step)
         return feat, task_loss, reward, done, (log_prob, state_value, action)
 
-    def expand_episode(self, dataset, feat, frame, tgt, return_avg):
+    def expand_episode(self, dataset, feat, frame, tgt, return_avg, randomise):
         # use a [B, N, C, H, W] to record all the feats, input feat is at index 0
         first_feat = feat
         B, _, C, H, W = feat.shape
@@ -120,7 +120,7 @@ class BaseTrainer(object):
         # rollout episode
         while not done:
             feat, task_loss, reward, done, (log_prob, state_value, action) = \
-                self.rollout(dataset, steps + 1, frame, feat, tgt)
+                self.rollout(dataset, steps + 1, frame, feat, tgt, randomise)
             # record state & transitions
             log_probs.append(log_prob)
             values.append(state_value)
@@ -237,7 +237,7 @@ class PerspectiveTrainer(BaseTrainer):
             if self.args.interactive:
                 # feat is only from the first cam
                 loss, (return_avg, value_loss, policy_loss), (feat, action) = \
-                    self.expand_episode(dataloader.dataset, feat, frame, world_gt['heatmap'], return_avg)
+                    self.expand_episode(dataloader.dataset, feat, frame, world_gt['heatmap'], return_avg, True)
                 overall_feat = feat.mean(dim=1) if self.model.aggregation == 'mean' else feat.max(dim=1)[0]
             else:
                 # in non-interactive mode, save the initial camera coverage if it doesn't exist
@@ -332,7 +332,7 @@ class PerspectiveTrainer(BaseTrainer):
 
                     # provide the initial feat, expand episode to get new feat and actions
                     loss, (return_avg, _, _), (feat, actions) = \
-                        self.expand_episode(dataloader.dataset, feat, frame, world_gt['heatmap'], return_avg)
+                        self.expand_episode(dataloader.dataset, feat, frame, world_gt['heatmap'], return_avg, False)
 
                     overall_feat = feat.mean(dim=1) if self.model.aggregation == 'mean' else feat.max(dim=1)[0]
                     world_heatmap, world_offset = self.model.get_output(overall_feat)
