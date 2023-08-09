@@ -237,7 +237,7 @@ if __name__ == '__main__':
     # MVcontrol settings
     parser.add_argument('--interactive', type=str2bool, default=False)
     parser.add_argument('--buffer_size', type=int, default=300, help='size of replay buffer')
-    parser.add_argument('--reward', type=str, help='type of reward used', choices=['loss', 'cover_sum', 'cover_mean', 'moda'])
+    parser.add_argument('--reward', type=str, help='type of reward used', choices=['loss', 'cover', 'moda'])
     parser.add_argument('--gamma', type=float, default=0.99, help='reward discount factor (default: 0.99)')
     parser.add_argument('--down', type=int, default=1, help='down sample the image to 1/N size')
     # multiview detection specific settings

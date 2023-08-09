@@ -27,7 +27,7 @@ class CamControl(nn.Module):
         self.value_head.weight.data.fill_(0)
         self.value_head.bias.data.fill_(0)
         # TODO: need way to converge log_std
-        self.log_std = nn.Parameter(-2.0 * torch.ones(action_dim, dtype=torch.float32))
+        self.log_std = nn.Parameter(-4.0 * torch.ones(action_dim, dtype=torch.float32))
 
     def forward(self, feat):
         overall_feat = feat.mean(dim=1) if self.aggregation == 'mean' else feat.max(dim=1)[0]

@@ -64,7 +64,7 @@ class BaseTrainer(object):
 
         # aggregate new feature, calculate loss and reward
         overall_feat = feat.mean(dim=1) if self.model.aggregation == 'mean' else feat.max(dim=1)[0]
-        task_loss, reward = self.task_loss_reward(dataset, frame, overall_feat, tgt)
+        task_loss, reward = self.task_loss_reward(dataset, frame, overall_feat, tgt, step)
         return feat, task_loss, reward, done, (log_prob, state_value, action)
 
     def expand_episode(self, dataset, feat, frame, tgt, return_avg):
@@ -93,13 +93,10 @@ class BaseTrainer(object):
         if self.args.reward == "loss":
             # option 1: use (-task_loss) as the reward
             self.last_reward = -task_loss.detach()
-        elif self.args.reward == "cover_sum":
+        elif self.args.reward == "cover":
             # option 2: use (coverage) as the reward
-            world_coverage = dataset.Rworld_coverage.max(dim=0)[0].mean(-1).mean(-1)
-            self.last_reward = world_coverage.cuda()
-        elif self.args.reward == "cover_mean":
-            world_coverage = dataset.Rworld_coverage.mean(dim=0).mean(-1).mean(-1)
-            self.last_reward = world_coverage.cuda()
+            # NOTE: we don't need last_reward for cover reward
+            self.last_reward = 0
         elif self.args.reward == "moda":
             # option 3: use (MODA) as the reward
             xys = mvdet_decode(torch.sigmoid(world_heatmap), world_offset,
@@ -165,7 +162,7 @@ class BaseTrainer(object):
 
         return loss, (return_avg, value_loss, policy_loss), (feat, actions)
 
-    def task_loss_reward(self, dataset, frame, overall_feat, tgt):
+    def task_loss_reward(self, dataset, frame, overall_feat, tgt, step):
         raise NotImplementedError
 
 
@@ -173,20 +170,17 @@ class PerspectiveTrainer(BaseTrainer):
     def __init__(self, model, logdir, args, ):
         super(PerspectiveTrainer, self).__init__(model, logdir, args, )
 
-    def task_loss_reward(self, dataset, frame, overall_feat, tgt):
+    def task_loss_reward(self, dataset, frame, overall_feat, tgt, step):
         world_heatmap, world_offset = self.model.get_output(overall_feat)
         task_loss = focal_loss(world_heatmap, tgt, reduction='none')
         # reward is defined as the delta value from previous reward
         if self.args.reward == "loss":
             # option 1: use (-task_loss) as the reward
             reward = -task_loss.detach() - self.last_reward
-        elif self.args.reward == "cover_sum":
+        elif self.args.reward == "cover":
             # option 2: use (coverage) as the reward
-            world_coverage = dataset.Rworld_coverage.max(dim=0)[0].mean(-1).mean(-1)
-            reward = world_coverage.cuda() - self.last_reward
-        elif self.args.reward == "cover_mean":
-            world_coverage = dataset.Rworld_coverage.mean(dim=0).mean(-1).mean(-1)
-            reward = world_coverage.cuda() - self.last_reward
+            world_coverage = dataset.Rworld_coverage[step].mean(-1).mean(-1)
+            reward = world_coverage.cuda()
         elif self.args.reward == "moda":
             # option 3: use (MODA) as the reward
             xys = mvdet_decode(torch.sigmoid(world_heatmap), world_offset,
