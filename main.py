@@ -51,12 +51,12 @@ def main(args):
 
     # dataset
     if args.dataset == 'carlax':
-
+        # TODO: move this to argument parser
         import json
 
         with open('./cfg/RL/1.cfg', "r") as fp:
             dataset_config = json.load(fp)
-        base = CarlaX(dataset_config, args.carla_seed)
+        base = CarlaX(dataset_config, args.host, args.port, args.carla_seed)
 
         args.task = 'mvdet'
         args.num_workers = 0
@@ -231,19 +231,21 @@ if __name__ == '__main__':
     parser.add_argument('--control_lr', type=float, default=None, help='learning rate for MVcontrol')
     parser.add_argument('--base_lr_ratio', type=float, default=1.0)
     parser.add_argument('--other_lr_ratio', type=float, default=1.0)
-    parser.add_argument('--std_lr_factor', type=float, default=80., help="factor of log_std learning rate")
+    parser.add_argument('--std_lr_factor', type=float, default=100., help="factor of log_std learning rate")
     parser.add_argument('--vf_ratio', type=float, default=0.5, help='value loss ratio')
     parser.add_argument('--weight_decay', type=float, default=1e-4)
     parser.add_argument('--resume', type=str, default=None)
     parser.add_argument('--visualize', action='store_true')
     parser.add_argument('--seed', type=int, default=None, help='random seed')
     parser.add_argument('--carla_seed', type=int, default=2023, help='random seed for CarlaX')
+    parser.add_argument('--host', type=str, default='127.0.0.1', help='CarlaX host; defaults to "127.0.0.1"')
+    parser.add_argument('--port', type=int, default=2000, help='CarlaX port; defaults to 2000')
     parser.add_argument('--deterministic', type=str2bool, default=False)
     parser.add_argument('--log_interval', type=int, default=100)
     # MVcontrol settings
     parser.add_argument('--interactive', type=str2bool, default=False)
     parser.add_argument('--buffer_size', type=int, default=300, help='size of replay buffer')
-    parser.add_argument('--reward', type=str, help='type of reward used', choices=['loss', 'cover', 'moda'])
+    parser.add_argument('--reward', type=str, help='type of reward used', choices=['loss', 'cover', 'moda', "cover+moda"])
     parser.add_argument('--gamma', type=float, default=0.99, help='reward discount factor (default: 0.99)')
     parser.add_argument('--down', type=int, default=1, help='down sample the image to 1/N size')
     # multiview detection specific settings

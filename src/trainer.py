@@ -97,13 +97,15 @@ class BaseTrainer(object):
             # option 2: use (coverage) as the reward
             # NOTE: we don't need last_reward for cover reward
             self.last_reward = 0
-        elif self.args.reward == "moda":
+        elif self.args.reward == "moda" or self.args.reward == "cover+moda":
             # option 3: use (MODA) as the reward
+            # option 4: use (coverage + MODA) as the reward
             res_list = self.bev_prediction(world_heatmap, world_offset, dataset, frame)
             res = torch.cat(res_list, dim=0).numpy() if res_list else np.empty([0, 3])
             # only evaluate stats for the current frame
             moda, modp, precision, recall, stats = evaluateDetection_py(res, dataset.gt_array)
-            self.last_reward = torch.tensor([moda]).cuda()
+            moda = torch.tensor([moda / 100]).cuda()
+            self.last_reward = moda
         else:
             raise NotImplementedError("Reward type not implemented")
 
@@ -184,21 +186,37 @@ class PerspectiveTrainer(BaseTrainer):
         if self.args.reward == "loss":
             # option 1: use (-task_loss) as the reward
             reward = -task_loss.detach() - self.last_reward
+            # set current_reward as last_reward for the next step
+            self.last_reward = reward
         elif self.args.reward == "cover":
             # option 2: use (coverage) as the reward
             world_coverage = dataset.Rworld_coverage[step].mean(-1).mean(-1)
             reward = world_coverage.cuda()
+            # set current_reward as last_reward for the next step
+            self.last_reward = reward
         elif self.args.reward == "moda":
             # option 3: use (MODA) as the reward
             res_list = self.bev_prediction(world_heatmap, world_offset, dataset, frame)
             res = torch.cat(res_list, dim=0).numpy() if res_list else np.empty([0, 3])
             # only evaluate stats for the current frame
             moda, modp, precision, recall, stats = evaluateDetection_py(res, dataset.gt_array)
-            reward = torch.tensor([moda]).cuda() - self.last_reward
+            moda = torch.tensor([moda / 100]).cuda()
+            reward = moda - self.last_reward
+            # set current_reward as last_reward for the next step
+            self.last_reward = reward
+        elif self.args.reward == "cover+moda":
+            # option 4: use (coverage + MODA) as the reward
+            world_coverage = dataset.Rworld_coverage[step].mean(-1).mean(-1)
+            res_list = self.bev_prediction(world_heatmap, world_offset, dataset, frame)
+            res = torch.cat(res_list, dim=0).numpy() if res_list else np.empty([0, 3])
+            # only evaluate stats for the current frame
+            moda, modp, precision, recall, stats = evaluateDetection_py(res, dataset.gt_array)
+            moda = torch.tensor([moda / 100]).cuda()
+            reward = world_coverage.cuda() + moda - self.last_reward
+            # set current `moda` as last_reward for the next step
+            self.last_reward = moda
         else:
             raise NotImplementedError("Reward type not implemented")
-        # set current_reward as last_reward for the next step
-        self.last_reward = reward
         return task_loss, reward
 
     def train(self, epoch, dataloader, optimizer, scheduler=None, log_interval=100):
