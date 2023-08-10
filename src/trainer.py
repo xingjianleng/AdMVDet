@@ -99,18 +99,8 @@ class BaseTrainer(object):
             self.last_reward = 0
         elif self.args.reward == "moda":
             # option 3: use (MODA) as the reward
-            xys = mvdet_decode(torch.sigmoid(world_heatmap), world_offset,
-                                reduce=dataset.world_reduce).cpu()
-            grid_xy, scores = xys[:, :, :2], xys[:, :, 2:3]
-            if dataset.base.indexing == 'xy':
-                positions = grid_xy
-            else:
-                positions = grid_xy[:, :, [1, 0]]
-            for b in range(world_heatmap.shape[0]):
-                ids = scores[b].squeeze() > self.args.cls_thres
-                pos, s = positions[b, ids], scores[b, ids, 0]
-                ids, count = nms(pos, s, 20, np.inf)
-                res = torch.cat([torch.ones([count, 1]) * frame[b], pos[ids[:count]]], dim=1)
+            res_list = self.bev_prediction(world_heatmap, world_offset, dataset, frame)
+            res = torch.cat(res_list, dim=0).numpy() if res_list else np.empty([0, 3])
             # only evaluate stats for the current frame
             moda, modp, precision, recall, stats = evaluateDetection_py(res, dataset.gt_array)
             self.last_reward = torch.tensor([moda]).cuda()
@@ -161,7 +151,24 @@ class BaseTrainer(object):
         loss = value_loss * self.args.vf_ratio + policy_loss
 
         return loss, (return_avg, value_loss, policy_loss), (feat, actions)
-
+    
+    def bev_prediction(self, world_heatmap, world_offset, dataset, frame):
+        res_list = []
+        xys = mvdet_decode(torch.sigmoid(world_heatmap), world_offset,
+                            reduce=dataset.world_reduce).cpu()
+        grid_xy, scores = xys[:, :, :2], xys[:, :, 2:3]
+        if dataset.base.indexing == 'xy':
+            positions = grid_xy
+        else:
+            positions = grid_xy[:, :, [1, 0]]
+        for b in range(world_heatmap.shape[0]):
+            ids = scores[b].squeeze() > self.args.cls_thres
+            pos, s = positions[b, ids], scores[b, ids, 0]
+            ids, count = nms(pos, s, 20, np.inf)
+            res = torch.cat([torch.ones([count, 1]) * frame[b], pos[ids[:count]]], dim=1)
+            res_list.append(res)
+        return res_list
+    
     def task_loss_reward(self, dataset, frame, overall_feat, tgt, step):
         raise NotImplementedError
 
@@ -183,18 +190,8 @@ class PerspectiveTrainer(BaseTrainer):
             reward = world_coverage.cuda()
         elif self.args.reward == "moda":
             # option 3: use (MODA) as the reward
-            xys = mvdet_decode(torch.sigmoid(world_heatmap), world_offset,
-                                reduce=dataset.world_reduce).cpu()
-            grid_xy, scores = xys[:, :, :2], xys[:, :, 2:3]
-            if dataset.base.indexing == 'xy':
-                positions = grid_xy
-            else:
-                positions = grid_xy[:, :, [1, 0]]
-            for b in range(world_heatmap.shape[0]):
-                ids = scores[b].squeeze() > self.args.cls_thres
-                pos, s = positions[b, ids], scores[b, ids, 0]
-                ids, count = nms(pos, s, 20, np.inf)
-                res = torch.cat([torch.ones([count, 1]) * frame[b], pos[ids[:count]]], dim=1)
+            res_list = self.bev_prediction(world_heatmap, world_offset, dataset, frame)
+            res = torch.cat(res_list, dim=0).numpy() if res_list else np.empty([0, 3])
             # only evaluate stats for the current frame
             moda, modp, precision, recall, stats = evaluateDetection_py(res, dataset.gt_array)
             reward = torch.tensor([moda]).cuda() - self.last_reward
@@ -307,6 +304,7 @@ class PerspectiveTrainer(BaseTrainer):
                     print(f'World coverage (mean): {world_coverage.mean(dim=0).mean(-1).mean(-1).item()}')
                     # save the world_coverage map as images for logs
                     plt.imsave(os.path.join(coverage_path, f"{batch_idx + 1}_mean.jpg"), world_coverage.mean(dim=0).squeeze())
+                print()
         return losses / len(dataloader), None
 
     def test(self, dataloader):
@@ -339,19 +337,8 @@ class PerspectiveTrainer(BaseTrainer):
             # append current loss
             losses += loss.item()
 
-            xys = mvdet_decode(torch.sigmoid(world_heatmap), world_offset,
-                                reduce=dataloader.dataset.world_reduce).cpu()
-            grid_xy, scores = xys[:, :, :2], xys[:, :, 2:3]
-            if dataloader.dataset.base.indexing == 'xy':
-                positions = grid_xy
-            else:
-                positions = grid_xy[:, :, [1, 0]]
-            for b in range(B):
-                ids = scores[b].squeeze() > self.args.cls_thres
-                pos, s = positions[b, ids], scores[b, ids, 0]
-                ids, count = nms(pos, s, 20, np.inf)
-                res = torch.cat([torch.ones([count, 1]) * frame[b], pos[ids[:count]]], dim=1)
-                res_list.append(res)
+            # put BEV prediction result list into res_list
+            res_list.extend(self.bev_prediction(world_heatmap, world_offset, dataloader.dataset, frame))
 
         # stack all results from all frames together
         res = torch.cat(res_list, dim=0).numpy() if res_list else np.empty([0, 3])
@@ -363,8 +350,10 @@ class PerspectiveTrainer(BaseTrainer):
                 f', time: {time.time() - t0:.1f}s')
         if self.args.interactive:
             # losses & print world coverage for debug
-            world_coverage = dataloader.dataset.Rworld_coverage.max(dim=0)[0]
-            print(f'return: {return_avg[-1]:.3f}'
-                f'World coverage: {world_coverage.mean(-1).mean(-1).item()}')
+            world_coverage = dataloader.dataset.Rworld_coverage
+            print(f'return: {return_avg[-1]:.3f} '
+                f'World coverage (max): {world_coverage.max(dim=0)[0].mean(-1).mean(-1).item()} '
+                f'World coverage (mean): {world_coverage.mean(dim=0).mean(-1).mean(-1).item()}')
+        print()
 
         return losses / len(dataloader), [moda, modp, precision, recall, ]

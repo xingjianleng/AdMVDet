@@ -119,7 +119,8 @@ def main(args):
 
     # logging
     lr_settings = f'base{args.base_lr_ratio}other{args.other_lr_ratio}' + \
-                  f'control{args.control_lr}vfratio{args.vf_ratio}buffer{args.buffer_size}' if args.interactive else ''
+                  f'control{args.control_lr}std_lr_factor{args.std_lr_factor}' + \
+                  f'vfratio{args.vf_ratio}buffer{args.buffer_size}' if args.interactive else ''
     logdir = f'logs/{args.dataset}/{"DEBUG_" if is_debug else ""}{args.arch}_{args.aggregation}_down{args.down}_' \
              f'{f"RL_reward{args.reward}_" if args.interactive else ""}' \
              f'lr{args.lr}{lr_settings}_b{args.batch_size}_e{args.epochs}_' \
@@ -161,8 +162,12 @@ def main(args):
                     "lr": args.lr * args.other_lr_ratio, },
                    {"params": [p for n, p in model.named_parameters() if 'base' in n and p.requires_grad],
                     "lr": args.lr * args.base_lr_ratio, },
-                   {"params": [p for n, p in model.named_parameters() if 'control' in n and p.requires_grad],
-                    "lr": args.control_lr, }, ]
+                #    {"params": [p for n, p in model.named_parameters() if 'control' in n and p.requires_grad],
+                #     "lr": args.control_lr, }, ]
+                   {"params": [p for n, p in model.named_parameters() if 'control' in n and 'log_std' not in n and p.requires_grad],
+                    "lr": args.control_lr, }, 
+                   {"params": [p for n, p in model.named_parameters() if 'control' in n and 'log_std' in n and p.requires_grad],
+                    "lr": args.control_lr * args.std_lr_factor, }]
     optimizer = optim.Adam(param_dicts, lr=args.lr, weight_decay=args.weight_decay)
 
     def warmup_lr_scheduler(epoch, warmup_epochs=0.1 * args.epochs):
@@ -226,6 +231,7 @@ if __name__ == '__main__':
     parser.add_argument('--control_lr', type=float, default=None, help='learning rate for MVcontrol')
     parser.add_argument('--base_lr_ratio', type=float, default=1.0)
     parser.add_argument('--other_lr_ratio', type=float, default=1.0)
+    parser.add_argument('--std_lr_factor', type=float, default=80., help="factor of log_std learning rate")
     parser.add_argument('--vf_ratio', type=float, default=0.5, help='value loss ratio')
     parser.add_argument('--weight_decay', type=float, default=1e-4)
     parser.add_argument('--resume', type=str, default=None)

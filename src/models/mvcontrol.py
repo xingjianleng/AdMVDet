@@ -26,8 +26,7 @@ class CamControl(nn.Module):
         self.value_head = nn.Linear(hidden_dim, 1)
         self.value_head.weight.data.fill_(0)
         self.value_head.bias.data.fill_(0)
-        # TODO: need way to converge log_std
-        self.log_std = nn.Parameter(-4.0 * torch.ones(action_dim, dtype=torch.float32))
+        self.log_std = nn.Parameter(-1 * torch.ones(action_dim, dtype=torch.float32))
 
     def forward(self, feat, randomise):
         overall_feat = feat.mean(dim=1) if self.aggregation == 'mean' else feat.max(dim=1)[0]
@@ -36,10 +35,10 @@ class CamControl(nn.Module):
 
         action_mean = torch.sigmoid(self.action_head(overall_feat))
         state_value = self.value_head(overall_feat)
-        action_std = torch.exp(self.log_std)
 
         # if training network, use randomised action, otherwise use the mean as action
         if randomise:
+            action_std = torch.exp(self.log_std).expand_as(action_mean)
             action_dist = Normal(action_mean, action_std)
             action = action_dist.sample()
             log_prob = action_dist.log_prob(action)
