@@ -56,7 +56,7 @@ def main(args):
 
         with open('./cfg/RL/1.cfg', "r") as fp:
             dataset_config = json.load(fp)
-        base = CarlaX(dataset_config, args.host, args.port, args.carla_seed)
+        base = CarlaX(dataset_config, args.host, args.port, args.tm_port, args.carla_seed)
 
         args.task = 'mvdet'
         args.num_workers = 0
@@ -240,6 +240,7 @@ if __name__ == '__main__':
     parser.add_argument('--carla_seed', type=int, default=2023, help='random seed for CarlaX')
     parser.add_argument('--host', type=str, default='127.0.0.1', help='CarlaX host; defaults to "127.0.0.1"')
     parser.add_argument('--port', type=int, default=2000, help='CarlaX port; defaults to 2000')
+    parser.add_argument('--tm_port', type=int, default=8000, help='TrafficManager port; defaults to 8000')
     parser.add_argument('--deterministic', type=str2bool, default=False)
     parser.add_argument('--log_interval', type=int, default=100)
     # MVcontrol settings
