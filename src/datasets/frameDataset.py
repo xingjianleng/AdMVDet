@@ -316,15 +316,15 @@ class frameDataset(VisionDataset):
             plt.imshow(img0)
             plt.show()
 
-        if self.interactive and step_counter is not None:
-            imgs = {step_counter: imgs[step_counter]}
-            configs = np.array([config for cam, config in configs.items()], dtype=np.float32)
-            # IMPORTANT: mask out padded items
-            padding_mask = np.arange(self.num_cam) > step_counter
-            configs[padding_mask] = -3
-        else:
-            step_counter = self.num_cam
-            configs = np.zeros([self.num_cam, 0])
+        # if self.interactive and step_counter is not None:
+        #     imgs = {step_counter: imgs[step_counter]}
+        #     configs = np.array([config for cam, config in configs.items()], dtype=np.float32)
+        #     # IMPORTANT: mask out padded items
+        #     padding_mask = np.arange(self.num_cam) > step_counter
+        #     configs[padding_mask] = -3
+        # else:
+        #     step_counter = self.num_cam
+        #     configs = np.zeros([self.num_cam, 0])
 
         aug_imgs, aug_imgs_gt, aug_mats, aug_masks = [], [], [], []
         for cam, img in imgs.items():

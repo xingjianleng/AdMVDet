@@ -67,7 +67,7 @@ class BaseTrainer(object):
         task_loss, reward = self.task_loss_reward(dataset, frame, overall_feat, tgt, step)
         return feat, task_loss, reward, done, (log_prob, state_value, action)
 
-    def expand_episode(self, dataset, feat, frame, tgt, return_avg, randomise):
+    def expand_episode(self, dataset, feat, frame, tgt, return_avg, training=False):
         # use a [B, N, C, H, W] to record all the feats, input feat is at index 0
         first_feat = feat
         B, _, C, H, W = feat.shape
@@ -112,7 +112,7 @@ class BaseTrainer(object):
         # rollout episode
         while not done:
             feat, task_loss, reward, done, (log_prob, state_value, action) = \
-                self.rollout(dataset, steps + 1, frame, feat, tgt, randomise)
+                self.rollout(dataset, steps + 1, frame, feat, tgt, training)
             # record state & transitions
             log_probs.append(log_prob)
             values.append(state_value)
@@ -202,8 +202,8 @@ class PerspectiveTrainer(BaseTrainer):
             moda, modp, precision, recall, stats = evaluateDetection_py(res, dataset.gt_array)
             moda = torch.tensor([moda / 100]).cuda()
             reward = moda - self.last_reward
-            # set current_reward as last_reward for the next step
-            self.last_reward = reward
+            # set current `moda` as last_reward for the next step
+            self.last_reward = moda
         elif self.args.reward == "cover+moda":
             # option 4: use (coverage + MODA) as the reward
             world_coverage = dataset.Rworld_coverage[step].mean(-1).mean(-1)
