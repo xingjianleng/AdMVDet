@@ -50,7 +50,7 @@ class CamControl(nn.Module):
             raise NotImplementedError(f"{variant} not implemented")
         self.log_std = nn.Parameter(-1 * torch.ones(action_dim, dtype=torch.float32))
 
-    def forward(self, feat, randomise):
+    def forward(self, feat, randomise, action=None):
         overall_feat = feat.mean(dim=1) if self.aggregation == 'mean' else feat.max(dim=1)[0]
         if self.variant == "conv_base":
             overall_feat = self.feat(overall_feat).amax(dim=[2, 3])
@@ -61,15 +61,19 @@ class CamControl(nn.Module):
         action_mean = torch.sigmoid(self.action_head(overall_feat))
         state_value = self.value_head(overall_feat)
 
-        # if training network, use randomised action, otherwise use the mean as action
-        if randomise:
-            action_std = torch.exp(self.log_std).expand_as(action_mean)
-            action_dist = Normal(action_mean, action_std)
-            action = action_dist.sample()
-            log_prob = action_dist.log_prob(action)
-        else:
-            action = action_mean
-            log_prob = torch.log(torch.ones_like(action))
+        action_std = torch.exp(self.log_std).expand_as(action_mean)
+        action_dist = Normal(action_mean, action_std)
 
-        # return log_prob, state_value, action, entropy
+        # if training network, use randomised action, otherwise use the mean as action
+        if action is None:
+            if randomise:
+                action = action_dist.sample()
+                log_prob = action_dist.log_prob(action)
+            else:
+                action = action_mean
+                log_prob = torch.log(torch.ones_like(action))
+        else:
+            log_prob = action_dist.log_prob(action)
+
+        # return log_prob, state_value, action
         return log_prob, state_value, action.detach().cpu().numpy()

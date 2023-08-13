@@ -19,28 +19,12 @@ from src.utils.meters import AverageMeter
 from src.utils.image_utils import add_heatmap_to_image, img_color_denormalize
 
 
-class RolloutBuffer:
-    def __init__(self, maxlen=500):
-        self.maxlen = maxlen
-        self.clear()
-    
-    def clear(self):
-        self.actions = deque(maxlen=self.maxlen)
-        self.states = deque(maxlen=self.maxlen)
-        self.logprobs = deque(maxlen=self.maxlen)
-        self.rewards = deque(maxlen=self.maxlen)
-        self.state_values = deque(maxlen=self.maxlen)
-        self.is_terminals = deque(maxlen=self.maxlen)
-
-
-class BaseTrainer(object):
+class PerspectiveTrainer(object):
     def __init__(self, model, logdir, args, ):
         self.model = model
         self.args = args
         self.logdir = logdir
         self.denormalize = img_color_denormalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
-        # replay buffer
-        self.buffer = RolloutBuffer(maxlen=args.buffer_size)
 
     def rollout(self, dataset, step, frame, feat, tgt, randomise):
         # feat: [B, N, C, H, W]
@@ -127,8 +111,6 @@ class BaseTrainer(object):
             np.stack(actions), torch.stack(rewards)
         task_loss_s = torch.stack(task_loss_s)
 
-        # TODO: append current episode to the replay buffer; calculate loss from the replay buffer
-
         # calculate returns for each step in episode
         # the batch size is always 1
         R = torch.zeros([B]).cuda()
@@ -170,14 +152,6 @@ class BaseTrainer(object):
             res = torch.cat([torch.ones([count, 1]) * frame[b], pos[ids[:count]]], dim=1)
             res_list.append(res)
         return res_list
-    
-    def task_loss_reward(self, dataset, frame, overall_feat, tgt, step):
-        raise NotImplementedError
-
-
-class PerspectiveTrainer(BaseTrainer):
-    def __init__(self, model, logdir, args, ):
-        super(PerspectiveTrainer, self).__init__(model, logdir, args, )
 
     def task_loss_reward(self, dataset, frame, overall_feat, tgt, step):
         world_heatmap, world_offset = self.model.get_output(overall_feat)
