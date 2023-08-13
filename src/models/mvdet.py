@@ -32,7 +32,7 @@ def output_head(in_dim, feat_dim, out_dim):
 
 class MVDet(MultiviewBase):
     def __init__(self, dataset, arch='resnet18', aggregation='max',
-                 use_bottleneck=True, hidden_dim=128, outfeat_dim=0, z=0):
+                 use_bottleneck=True, hidden_dim=128, outfeat_dim=0, rl_variant="conv_base", z=0):
         super().__init__(dataset, aggregation)
         self.Rimg_shape, self.Rworld_shape = np.array(dataset.Rimg_shape), np.array(dataset.Rworld_shape)
         self.img_reduce = dataset.img_reduce
@@ -69,7 +69,7 @@ class MVDet(MultiviewBase):
         # only activate the control module for CarlaX dataset
         if dataset.base.__name__ == "CarlaX" and dataset.interactive:
             action_dim = len(dataset.base.env.opts["env_action_space"].split("-"))
-            self.control_module = CamControl(action_dim, hidden_dim, 3, aggregation)
+            self.control_module = CamControl(action_dim, hidden_dim, rl_variant, 3, aggregation)
 
         # world heads
         self.world_heatmap = output_head(hidden_dim, outfeat_dim, 1)
