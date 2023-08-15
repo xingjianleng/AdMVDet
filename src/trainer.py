@@ -48,7 +48,7 @@ class PerspectiveTrainer(object):
 
         # aggregate new feature, calculate loss and reward
         overall_feat = feat.mean(dim=1) if self.model.aggregation == 'mean' else feat.max(dim=1)[0]
-        task_loss, reward = self.task_loss_reward(dataset, frame, overall_feat, tgt, step)
+        task_loss, reward = self.task_loss_reward(dataset, frame, overall_feat, tgt, done, step)
         return feat, task_loss, reward, done, (log_prob, state_value, action)
 
     def expand_episode(self, dataset, feat, frame, tgt, return_avg, training=False):
@@ -74,16 +74,15 @@ class PerspectiveTrainer(object):
         task_loss = focal_loss(world_heatmap, tgt, reduction='none')
 
         # initialize last_reward
-        if self.args.reward == "loss":
-            # option 1: use (-task_loss) as the reward
-            self.last_reward = -task_loss.detach()
-        elif self.args.reward == "cover":
-            # option 2: use (coverage) as the reward
-            # NOTE: we don't need last_reward for cover reward
+        if self.args.reward in ["epi_loss", "epi_cover_mean", "epi_cover_max", "step_cover", "epi_moda"]:
+            # NOTE: we don't need last_reward for these reward
             self.last_reward = 0
-        elif self.args.reward == "moda" or self.args.reward == "cover+moda":
-            # option 3: use (MODA) as the reward
-            # option 4: use (coverage + MODA) as the reward
+        elif self.args.reward == "delta_loss":
+            # option 2: use (delta -task_loss) as the reward
+            self.last_reward = -task_loss.detach()
+        elif self.args.reward in ["delta_moda", "cover+moda"]:
+            # option 7: use (MODA) as the reward
+            # option 8: use (coverage + MODA) as the reward
             res_list = self.bev_prediction(world_heatmap, world_offset, dataset, frame)
             res = torch.cat(res_list, dim=0).numpy() if res_list else np.empty([0, 3])
             # only evaluate stats for the current frame
@@ -153,23 +152,51 @@ class PerspectiveTrainer(object):
             res_list.append(res)
         return res_list
 
-    def task_loss_reward(self, dataset, frame, overall_feat, tgt, step):
+    def task_loss_reward(self, dataset, frame, overall_feat, tgt, done, step):
         world_heatmap, world_offset = self.model.get_output(overall_feat)
         task_loss = focal_loss(world_heatmap, tgt, reduction='none')
         # reward is defined as the delta value from previous reward
-        if self.args.reward == "loss":
-            # option 1: use (-task_loss) as the reward
+        if self.args.reward == "epi_loss":
+            # option 1: use (episode -task_loss) as the reward
+            reward = torch.zeros_like(task_loss).cuda() if not done else -task_loss.detach()
+            # set current_reward as last_reward for the next step
+            self.last_reward = reward
+        elif self.args.reward == "delta_loss":
+            # option 2: use (delta -task_loss) as the reward
             reward = -task_loss.detach() - self.last_reward
             # set current_reward as last_reward for the next step
+            self.last_reward = -task_loss.detach()
+        elif self.args.reward == "epi_cover_mean":
+            # option 3: use (episode cover mean) as the reward
+            world_coverage = dataset.Rworld_coverage.mean(0).mean(-1).mean(-1).cuda()
+            reward = torch.zeros_like(task_loss).cuda() if not done else world_coverage
             self.last_reward = reward
-        elif self.args.reward == "cover":
-            # option 2: use (coverage) as the reward
-            world_coverage = dataset.Rworld_coverage[step].mean(-1).mean(-1)
-            reward = world_coverage.cuda()
+        elif self.args.reward == "epi_cover_max":
+            # option 4： 
+            world_coverage = dataset.Rworld_coverage.max(0)[0].mean(-1).mean(-1).cuda()
+            reward = torch.zeros_like(task_loss).cuda() if not done else world_coverage
+            self.last_reward = reward
+        elif self.args.reward == "step_cover":
+            # option 5: use (coverage) as the reward
+            world_coverage = dataset.Rworld_coverage[step].mean(-1).mean(-1).cuda()
+            reward = world_coverage
             # set current_reward as last_reward for the next step
             self.last_reward = reward
-        elif self.args.reward == "moda":
-            # option 3: use (MODA) as the reward
+        elif self.args.reward == "epi_moda":
+            # option 6: use (episode MODA) as the reward
+            if done:
+                res_list = self.bev_prediction(world_heatmap, world_offset, dataset, frame)
+                res = torch.cat(res_list, dim=0).numpy() if res_list else np.empty([0, 3])
+                # only evaluate stats for the current frame
+                moda, modp, precision, recall, stats = evaluateDetection_py(res, dataset.gt_array)
+                moda = torch.tensor([moda / 100]).cuda()
+                reward = moda
+            else:
+                reward = torch.zeros_like(task_loss).cuda()
+            # set current `moda` as last_reward for the next step
+            self.last_reward = reward
+        elif self.args.reward == "delta_moda":
+            # option 7: use (delta MODA) as the reward
             res_list = self.bev_prediction(world_heatmap, world_offset, dataset, frame)
             res = torch.cat(res_list, dim=0).numpy() if res_list else np.empty([0, 3])
             # only evaluate stats for the current frame
@@ -179,14 +206,15 @@ class PerspectiveTrainer(object):
             # set current `moda` as last_reward for the next step
             self.last_reward = moda
         elif self.args.reward == "cover+moda":
-            # option 4: use (coverage + MODA) as the reward
+            # option 8: use (coverage + MODA) as the reward
             world_coverage = dataset.Rworld_coverage[step].mean(-1).mean(-1)
             res_list = self.bev_prediction(world_heatmap, world_offset, dataset, frame)
             res = torch.cat(res_list, dim=0).numpy() if res_list else np.empty([0, 3])
             # only evaluate stats for the current frame
             moda, modp, precision, recall, stats = evaluateDetection_py(res, dataset.gt_array)
             moda = torch.tensor([moda / 100]).cuda()
-            reward = world_coverage.cuda() + moda - self.last_reward
+            # NOTE: coefficient for balancing two factors - 0.0125
+            reward = 0.0125 * world_coverage.cuda() + moda - self.last_reward
             # set current `moda` as last_reward for the next step
             self.last_reward = moda
         else:

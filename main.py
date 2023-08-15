@@ -56,7 +56,7 @@ def main(args):
 
         with open('./cfg/RL/1.cfg', "r") as fp:
             dataset_config = json.load(fp)
-        base = CarlaX(dataset_config, args.host, args.port, args.tm_port, args.carla_seed)
+        base = CarlaX(dataset_config, args.host, args.port, args.tm_port, args.spawn_strategy, args.carla_seed)
 
         args.task = 'mvdet'
         args.num_workers = 0
@@ -122,7 +122,7 @@ def main(args):
                   f'control{args.control_lr}std_lr_factor{args.std_lr_factor}' + \
                   f'vfratio{args.vf_ratio}' if args.interactive else ''
     logdir = f'logs/{args.dataset}/{"DEBUG_" if is_debug else ""}{args.arch}_{args.aggregation}_down{args.down}_' \
-             f'{f"RL_reward{args.reward}_arch{args.rl_variant}_" if args.interactive else ""}' \
+             f'{f"RL_reward{args.reward}_spawn{args.spawn_strategy}_arch{args.rl_variant}_" if args.interactive else ""}' \
              f'lr{args.lr}{lr_settings}_b{args.batch_size}_e{args.epochs}_' \
              f'{datetime.datetime.today():%Y-%m-%d_%H-%M-%S}' if not args.eval \
         else f'logs/{args.dataset}/EVAL_{args.resume}'
@@ -163,8 +163,6 @@ def main(args):
                     "lr": args.lr * args.other_lr_ratio, },
                    {"params": [p for n, p in model.named_parameters() if 'base' in n and p.requires_grad],
                     "lr": args.lr * args.base_lr_ratio, },
-                #    {"params": [p for n, p in model.named_parameters() if 'control' in n and p.requires_grad],
-                #     "lr": args.control_lr, }, ]
                    {"params": [p for n, p in model.named_parameters() if 'control' in n and 'log_std' not in n and p.requires_grad],
                     "lr": args.control_lr, }, 
                    {"params": [p for n, p in model.named_parameters() if 'control' in n and 'log_std' in n and p.requires_grad],
@@ -244,9 +242,11 @@ if __name__ == '__main__':
     parser.add_argument('--tm_port', type=int, default=8000, help='TrafficManager port; defaults to 8000')
     parser.add_argument('--deterministic', type=str2bool, default=False)
     parser.add_argument('--log_interval', type=int, default=100)
+    # CarlaX settings
+    parser.add_argument('--spawn_strategy', type=str, choices=['uniform', 'gmm'])
     # MVcontrol settings
     parser.add_argument('--interactive', type=str2bool, default=False)
-    parser.add_argument('--reward', type=str, help='type of reward used', choices=['loss', 'cover', 'moda', "cover+moda"])
+    parser.add_argument('--reward', type=str, help='type of reward used', choices=['loss', 'step_cover', 'delta_moda', "cover+moda"])
     parser.add_argument('--rl_variant', type=str, help='architecture variants of the RL module', choices=["conv_base", "conv_deep_leaky"])
     parser.add_argument('--gamma', type=float, default=0.99, help='reward discount factor (default: 0.99)')
     parser.add_argument('--down', type=int, default=1, help='down sample the image to 1/N size')

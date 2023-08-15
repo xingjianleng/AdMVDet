@@ -12,6 +12,7 @@ from gym import spaces
 import numpy as np
 import matplotlib.pyplot as plt
 
+from src.utils.stats import sample_from_gmm_2d
 from .cameras import build_cam
 from .utils import loc_dist, pflat
 
@@ -85,8 +86,9 @@ class CarlaCameraSeqEnv(gym.Env):
     The CARLA environment for single-camera multi-frame pedestrian detection
     """
 
-    def __init__(self, opts, seed=None, host="127.0.0.1", port=2000, tm_port=8000):
+    def __init__(self, opts, spawn_strategy, seed=None, host="127.0.0.1", port=2000, tm_port=8000):
         self.opts = opts
+        self.spawn_strategy = spawn_strategy
 
         # if seed is provided, set seed to generators
         # otherwise randomly initialise generators
@@ -355,6 +357,20 @@ class CarlaCameraSeqEnv(gym.Env):
         min_y, max_y = self.opts["spawn_area"][2:4]
         min_x, min_y = min_x + 0.5, min_y + 0.5
         max_x, max_y = max_x - 0.5, max_y - 0.5
+
+        if self.spawn_strategy == 'gmm':
+            # randomize the gmm parameters for the current scene
+            num_peaks = self.random_generator.choice(list(range(1, 4)))
+            weights = self.np_random_generator.random(num_peaks)
+            weights /= weights.sum()
+            means_x = self.np_random_generator.uniform(min_x, max_x, size=(num_peaks, 1))
+            means_y = self.np_random_generator.uniform(min_y, max_y, size=(num_peaks, 1))
+            means = np.hstack((means_x, means_y))
+            variances = self.np_random_generator.uniform(4, 9, size=(num_peaks, 2))
+            cov = []
+            for variance in variances:
+                cov.append(np.diag(variance))
+            cov = np.array(cov)
         # Spawn pedestrians
         spawn_points = []
         for _ in range(self.opts["spawn_count"]):
@@ -363,8 +379,15 @@ class CarlaCameraSeqEnv(gym.Env):
             while loc is None:
                 # random initialise x, y, z
                 loc = carla.Location()
-                loc.x = self.random_generator.uniform(min_x, max_x)
-                loc.y = self.random_generator.uniform(min_y, max_y)
+                if self.spawn_strategy == 'uniform':
+                    loc.x = self.random_generator.uniform(min_x, max_x)
+                    loc.y = self.random_generator.uniform(min_y, max_y)
+                elif self.spawn_strategy == 'gmm':
+                    sample = sample_from_gmm_2d(self.np_random_generator, weights, means, cov, 1)[0]
+                    loc.x = sample[0]
+                    loc.y = sample[1]
+                else:
+                    raise NotImplementedError(f'{self.spawn_strategy} not implemented')
                 # avoid collision with ground
                 loc.z = 1.0
                 if len(spawn_points):
