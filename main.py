@@ -1,8 +1,7 @@
 import os
 
 os.environ['OMP_NUM_THREADS'] = '1'
-import time
-import itertools
+import json
 import argparse
 import sys
 import shutil
@@ -51,19 +50,12 @@ def main(args):
 
     # dataset
     if args.dataset == 'carlax':
-        # TODO: move this to argument parser
-        import json
-
-        with open('./cfg/RL/1.cfg', "r") as fp:
+        with open(args.cfg_path, "r") as fp:
             dataset_config = json.load(fp)
         base = CarlaX(dataset_config, args.host, args.port, args.tm_port, args.spawn_strategy, args.carla_seed)
 
         args.task = 'mvdet'
         args.num_workers = 0
-        result_type = ['moda', 'modp', 'prec', 'recall']
-        args.lr = 5e-4 if args.lr is None else args.lr
-        args.control_lr = 1e-4 if args.control_lr is None else args.control_lr
-        args.batch_size = 1 if args.batch_size is None else args.batch_size
 
         train_set = frameDataset(base, split='trainval', world_reduce=args.world_reduce,
                                  img_reduce=args.img_reduce, world_kernel_size=args.world_kernel_size,
@@ -84,10 +76,6 @@ def main(args):
             raise Exception('must choose from [wildtrack, multiviewx]')
 
         args.task = 'mvdet'
-        result_type = ['moda', 'modp', 'prec', 'recall']
-        args.lr = 5e-4 if args.lr is None else args.lr
-        args.control_lr = 1e-4 if args.control_lr is None else args.control_lr
-        args.batch_size = 1 if args.batch_size is None else args.batch_size
 
         train_set = frameDataset(base, split='trainval', world_reduce=args.world_reduce,
                                  img_reduce=args.img_reduce, world_kernel_size=args.world_kernel_size,
@@ -121,11 +109,12 @@ def main(args):
     lr_settings = f'base{args.base_lr_ratio}other{args.other_lr_ratio}' + \
                   f'control{args.control_lr}std_lr_factor{args.std_lr_factor}' + \
                   f'vfratio{args.vf_ratio}' if args.interactive else ''
-    logdir = f'logs/{args.dataset}/{"DEBUG_" if is_debug else ""}{args.arch}_{args.aggregation}_down{args.down}_' \
+    logdir = f'logs/{args.dataset}/{"DEBUG_" if is_debug else ""}{"FINE_TUNE_" if args.fine_tune else ""}' \
+             f'{args.arch}_{args.aggregation}_down{args.down}_' \
              f'{f"RL_reward{args.reward}_spawn{args.spawn_strategy}_arch{args.rl_variant}_" if args.interactive else ""}' \
              f'lr{args.lr}{lr_settings}_b{args.batch_size}_e{args.epochs}_' \
              f'{datetime.datetime.today():%Y-%m-%d_%H-%M-%S}' if not args.eval \
-        else f'logs/{args.dataset}/EVAL_{args.resume}'
+        else f'logs/{args.dataset}/EVAL_{datetime.datetime.today():%Y-%m-%d_%H-%M-%S}'
     os.makedirs(logdir, exist_ok=True)
     copy_tree('src', logdir + '/scripts/src')
     for script in os.listdir('.'):
@@ -141,20 +130,43 @@ def main(args):
     model = MVDet(train_set, args.arch, args.aggregation,
                   args.use_bottleneck, args.hidden_dim, args.outfeat_dim,
                   args.rl_variant if args.interactive else '').cuda()
-
-    # load checkpoint
-    if args.interactive:
-        pretrained_dict = torch.load(os.path.join(f'logs/{args.dataset}/', 'base.pth'))
-        model_dict = model.state_dict()
-        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict and 'control' not in k}
-        model_dict.update(pretrained_dict)
-        model.load_state_dict(model_dict)
-
-    if args.resume:
+    
+    # different modes of training
+    if args.eval:
+        # eval must be with resume
+        assert args.resume is not None, 'must provide a checkpoint for evaluation'
         print(f'loading checkpoint: logs/{args.dataset}/{args.resume}')
         pretrained_dict = torch.load(f'logs/{args.dataset}/{args.resume}/model.pth')
         model_dict = model.state_dict()
         pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+        model_dict.update(pretrained_dict)
+        model.load_state_dict(model_dict)
+
+    elif args.fine_tune:
+        assert args.resume is not None, 'must provide a checkpoint for fine-tuning'
+        # resume training is used for fine-tuning the output head
+        print(f'loading checkpoint: logs/{args.dataset}/{args.resume}')
+        pretrained_dict = torch.load(f'logs/{args.dataset}/{args.resume}/model.pth')
+        model_dict = model.state_dict()
+        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+        model_dict.update(pretrained_dict)
+        model.load_state_dict(model_dict)
+
+        # NOTE: only fine-tune the output head
+        for n, p in model.named_parameters():
+            if 'world' in n:
+                p.requires_grad = True
+            else:
+                p.requires_grad = False
+
+        # set a lower starting learning rate for fine-tuning
+        args.lr /= 2
+    
+    # load base checkpoint
+    elif args.interactive:
+        pretrained_dict = torch.load(os.path.join(f'logs/{args.dataset}/', 'base.pth'))
+        model_dict = model.state_dict()
+        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict and 'control' not in k}
         model_dict.update(pretrained_dict)
         model.load_state_dict(model_dict)
 
@@ -210,53 +222,57 @@ def main(args):
     print(logdir)
     trainer.test(test_loader)
 
-    # copy base model file
+    # copy base model file if 
     if args.dataset == 'carlax' and not args.interactive:
         shutil.copy(os.path.join(logdir, 'model.pth'), os.path.join(f'logs/{args.dataset}/', 'base.pth'))
 
 
 if __name__ == '__main__':
-    # common settings
+    # Common settings
     parser = argparse.ArgumentParser(description='camera position control for multiview classification & detection')
+    parser.add_argument('--arch', type=str, default='resnet18', choices=['resnet18', 'shufflenet0.5'])
     parser.add_argument('--eval', action='store_true', help='evaluation only')
-    parser.add_argument('--arch', type=str, default='resnet18')
-    parser.add_argument('--aggregation', type=str, default='max', choices=['mean', 'max'])
+    parser.add_argument('--fine_tune', action='store_true', help='fine tune the output head')
+    parser.add_argument('--resume', type=str, default=None)
     parser.add_argument('-d', '--dataset', type=str, default='carlax',
                         choices=['wildtrack', 'multiviewx', 'carlax'])
     parser.add_argument('-j', '--num_workers', type=int, default=4)
-    parser.add_argument('-b', '--batch_size', type=int, default=None, help='input batch size for training')
+    parser.add_argument('-b', '--batch_size', type=int, default=1, help='input batch size for training')
     parser.add_argument('--epochs', type=int, default=10, help='number of epochs to train')
-    parser.add_argument('--lr', type=float, default=None, help='learning rate for task network')
-    parser.add_argument('--control_lr', type=float, default=None, help='learning rate for MVcontrol')
+    parser.add_argument('--lr', type=float, default=5e-4, help='learning rate for task network')
+    parser.add_argument('--control_lr', type=float, default=1e-4, help='learning rate for MVcontrol')
     parser.add_argument('--base_lr_ratio', type=float, default=1.0)
     parser.add_argument('--other_lr_ratio', type=float, default=1.0)
     parser.add_argument('--std_lr_factor', type=float, default=100., help="factor of log_std learning rate")
-    parser.add_argument('--vf_ratio', type=float, default=0.5, help='value loss ratio')
     parser.add_argument('--weight_decay', type=float, default=1e-4)
-    parser.add_argument('--resume', type=str, default=None)
     parser.add_argument('--visualize', action='store_true')
     parser.add_argument('--seed', type=int, default=None, help='random seed')
+    parser.add_argument('--deterministic', action='store_true', help='whether to set deterministic options')
+    parser.add_argument('--log_interval', type=int, default=100)
+    # CarlaX settings
+    parser.add_argument('--cfg_path', type=str, help='path to the config file')
+    parser.add_argument('--spawn_strategy', type=str, choices=['uniform', 'gmm'])
     parser.add_argument('--carla_seed', type=int, default=2023, help='random seed for CarlaX')
     parser.add_argument('--host', type=str, default='127.0.0.1', help='CarlaX host; defaults to "127.0.0.1"')
     parser.add_argument('--port', type=int, default=2000, help='CarlaX port; defaults to 2000')
     parser.add_argument('--tm_port', type=int, default=8000, help='TrafficManager port; defaults to 8000')
-    parser.add_argument('--deterministic', type=str2bool, default=False)
-    parser.add_argument('--log_interval', type=int, default=100)
-    # CarlaX settings
-    parser.add_argument('--spawn_strategy', type=str, choices=['uniform', 'gmm'])
     # MVcontrol settings
-    parser.add_argument('--interactive', type=str2bool, default=False)
-    parser.add_argument('--reward', type=str, help='type of reward used', choices=['loss', 'step_cover', 'delta_moda', "cover+moda"])
-    parser.add_argument('--rl_variant', type=str, help='architecture variants of the RL module', choices=["conv_base", "conv_deep_leaky"])
+    parser.add_argument('--interactive', action='store_true', help='interactive mode')
     parser.add_argument('--gamma', type=float, default=0.99, help='reward discount factor (default: 0.99)')
-    parser.add_argument('--down', type=int, default=1, help='down sample the image to 1/N size')
-    # multiview detection specific settings
-    parser.add_argument('--reID', action='store_true')
+    parser.add_argument('--vf_ratio', type=float, default=0.5, help='value loss ratio')
+    parser.add_argument('--reward', type=str, help='type of reward used',
+                        choices=['epi_loss', 'delta_loss', 'epi_cover_mean', 'epi_cover_max',
+                                 'step_cover', 'epi_moda', 'delta_moda', "cover+moda"])
+    parser.add_argument('--rl_variant', type=str, help='architecture variants of the RL module', choices=["conv_base", "conv_deep_leaky"])
+    # Multiview detection specific settings
+    parser.add_argument('--reID', action='store_true', help='reID task')
+    parser.add_argument('--aggregation', type=str, default='max', choices=['mean', 'max'])
     parser.add_argument('--augmentation', type=str2bool, default=True)
+    parser.add_argument('--down', type=int, default=1, help='down sample the image to 1/N size')
     parser.add_argument('--id_ratio', type=float, default=0)
     parser.add_argument('--cls_thres', type=float, default=0.6)
     parser.add_argument('--alpha', type=float, default=0.0, help='ratio for per view loss')
-    parser.add_argument('--use_mse', type=str2bool, default=False)
+    parser.add_argument('--use_mse', action='store_true', help='use mse loss for regression')
     parser.add_argument('--use_bottleneck', type=str2bool, default=True)
     parser.add_argument('--hidden_dim', type=int, default=128)
     parser.add_argument('--outfeat_dim', type=int, default=0)
