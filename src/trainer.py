@@ -127,11 +127,13 @@ class PerspectiveTrainer(object):
         policy_loss = (-log_probs * (returns - values.detach())).mean()
 
         # task loss
-        # task_loss = task_loss_s[-1]
-        # loss.append(value_loss + policy_loss + task_loss -
-        #             entropies.mean() * self.args.beta_entropy * eps_thres)
+        task_loss = task_loss_s[-1]
 
-        loss = value_loss * self.args.vf_ratio + policy_loss
+        # task loss is not used in the training, but used for fine-tuning
+        if self.args.fine_tune:
+            loss = task_loss
+        else:
+            loss = value_loss * self.args.vf_ratio + policy_loss
 
         return loss, (return_avg, value_loss, policy_loss), (feat, actions)
     

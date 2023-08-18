@@ -161,6 +161,8 @@ def main(args):
 
         # set a lower starting learning rate for fine-tuning
         args.lr /= 2
+        # set a lower number of training epochs for fine-tuning
+        args.epochs //=  2
     
     # load base checkpoint
     elif args.interactive:
