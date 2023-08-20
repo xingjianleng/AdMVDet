@@ -129,7 +129,7 @@ def main(args):
     # model
     model = MVDet(train_set, args.arch, args.aggregation,
                   args.use_bottleneck, args.hidden_dim, args.outfeat_dim,
-                  args.rl_variant if args.interactive else '').cuda()
+                  args.rl_variant if args.interactive else '', seed=args.seed).cuda()
     
     # different modes of training
     if args.eval:
@@ -200,8 +200,8 @@ def main(args):
     test_loss_s = []
     test_prec_s = []
 
-    # learn
-    if not args.eval:
+    # learn if 1. not in evaluation mode for all other rl_variants; 2. only when fine-tuning the random_action model
+    if not args.eval and (args.rl_variant != "random_action" or args.fine_tune):
         # trainer.test(test_loader)
         for epoch in tqdm.tqdm(range(1, args.epochs + 1)):
             print('Training...')
@@ -264,8 +264,9 @@ if __name__ == '__main__':
     parser.add_argument('--vf_ratio', type=float, default=0.5, help='value loss ratio')
     parser.add_argument('--reward', type=str, help='type of reward used',
                         choices=['epi_loss', 'delta_loss', 'epi_cover_mean', 'epi_cover_max',
-                                 'step_cover', 'epi_moda', 'delta_moda', "cover+moda"])
-    parser.add_argument('--rl_variant', type=str, help='architecture variants of the RL module', choices=["conv_base", "conv_deep_leaky"])
+                                 'step_cover', 'epi_moda', 'delta_moda', "cover+delta_moda"])
+    parser.add_argument('--rl_variant', type=str, help='architecture variants of the RL module',
+                        choices=["random_action", "conv_base", "conv_deep_leaky"])
     # Multiview detection specific settings
     parser.add_argument('--reID', action='store_true', help='reID task')
     parser.add_argument('--aggregation', type=str, default='max', choices=['mean', 'max'])

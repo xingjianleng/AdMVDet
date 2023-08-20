@@ -13,10 +13,11 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class CamControl(nn.Module):
-    def __init__(self, action_dim, hidden_dim, variant="conv_base", kernel_size=1, aggregation='max'):
+    def __init__(self, action_dim, hidden_dim, variant="conv_base", kernel_size=1, aggregation='max', seed=0):
         super().__init__()
         self.aggregation = aggregation
         self.variant = variant
+        self.action_dim = action_dim
 
         if kernel_size == 1:
             stride, padding = 1, 0
@@ -46,11 +47,22 @@ class CamControl(nn.Module):
             self.action_head = nn.Sequential(layer_init(nn.Linear(hidden_dim, hidden_dim)), nn.LeakyReLU(),
                                             layer_init(nn.Linear(hidden_dim, hidden_dim)), nn.LeakyReLU(),
                                             layer_init(nn.Linear(hidden_dim, action_dim), std=0.01))
+        elif variant == "random_action":
+            self.np_random_generator = np.random.default_rng(seed)
         else:
             raise NotImplementedError(f"{variant} not implemented")
         self.log_std = nn.Parameter(-1 * torch.ones(action_dim, dtype=torch.float32))
 
     def forward(self, feat, randomise, action=None):
+        # NOTE: random_action variant is used for random agent
+        if self.variant == "random_action":
+            # log_prob and state_value are not used in random agent
+            log_prob = torch.log(torch.ones(feat.shape[0], self.action_dim, dtype=torch.float32)).to(feat.device)
+            state_value = torch.zeros(feat.shape[0], 1, dtype=torch.float32).to(feat.device)
+            action = self.np_random_generator.uniform(0, 1, size=(feat.shape[0], self.action_dim))
+            return log_prob, state_value, action
+
+        # NOTE: randomise represents whether to sample actions from the distribution or not
         overall_feat = feat.mean(dim=1) if self.aggregation == 'mean' else feat.max(dim=1)[0]
         if self.variant == "conv_base":
             overall_feat = self.feat(overall_feat).amax(dim=[2, 3])

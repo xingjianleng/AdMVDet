@@ -80,7 +80,7 @@ class PerspectiveTrainer(object):
         elif self.args.reward == "delta_loss":
             # option 2: use (delta -task_loss) as the reward
             self.last_reward = -task_loss.detach()
-        elif self.args.reward in ["delta_moda", "cover+moda"]:
+        elif self.args.reward in ["delta_moda", "cover+delta_moda"]:
             # option 7: use (MODA) as the reward
             # option 8: use (coverage + MODA) as the reward
             res_list = self.bev_prediction(world_heatmap, world_offset, dataset, frame)
@@ -207,7 +207,7 @@ class PerspectiveTrainer(object):
             reward = moda - self.last_reward
             # set current `moda` as last_reward for the next step
             self.last_reward = moda
-        elif self.args.reward == "cover+moda":
+        elif self.args.reward == "cover+delta_moda":
             # option 8: use (coverage + MODA) as the reward
             world_coverage = dataset.Rworld_coverage[step].mean(-1).mean(-1)
             res_list = self.bev_prediction(world_heatmap, world_offset, dataset, frame)
