@@ -61,9 +61,6 @@ def main(args):
                                  img_reduce=args.img_reduce, world_kernel_size=args.world_kernel_size,
                                  img_kernel_size=args.img_kernel_size,
                                  augmentation=args.augmentation, interactive=args.interactive)
-        val_set = frameDataset(base, split='val', world_reduce=args.world_reduce,
-                               img_reduce=args.img_reduce, world_kernel_size=args.world_kernel_size,
-                               img_kernel_size=args.img_kernel_size, interactive=args.interactive)
         test_set = frameDataset(base, split='test', world_reduce=args.world_reduce,
                                 img_reduce=args.img_reduce, world_kernel_size=args.world_kernel_size,
                                 img_kernel_size=args.img_kernel_size, interactive=args.interactive)
@@ -81,9 +78,6 @@ def main(args):
                                  img_reduce=args.img_reduce, world_kernel_size=args.world_kernel_size,
                                  img_kernel_size=args.img_kernel_size,
                                  augmentation=args.augmentation)
-        val_set = frameDataset(base, split='val', world_reduce=args.world_reduce,
-                               img_reduce=args.img_reduce, world_kernel_size=args.world_kernel_size,
-                               img_kernel_size=args.img_kernel_size)
         test_set = frameDataset(base, split='test', world_reduce=args.world_reduce,
                                 img_reduce=args.img_reduce, world_kernel_size=args.world_kernel_size,
                                 img_kernel_size=args.img_kernel_size)
@@ -99,19 +93,16 @@ def main(args):
 
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers,
                               pin_memory=True, worker_init_fn=seed_worker)
-    val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers,
-                            pin_memory=True, worker_init_fn=seed_worker)
     test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers,
                              pin_memory=True, worker_init_fn=seed_worker)
-    N = train_set.num_cam
 
     # logging
     lr_settings = f'base{args.base_lr_ratio}other{args.other_lr_ratio}' + \
                   f'control{args.control_lr}std_lr_factor{args.std_lr_factor}' + \
                   f'vfratio{args.vf_ratio}' if args.interactive else ''
     logdir = f'logs/{args.dataset}/{"DEBUG_" if is_debug else ""}{"FINE_TUNE_" if args.fine_tune else ""}' \
-             f'{args.arch}_{args.aggregation}_down{args.down}_' \
-             f'{f"RL_reward{args.reward}_spawn{args.spawn_strategy}_arch{args.rl_variant}_" if args.interactive else ""}' \
+             f'{args.arch}_{args.aggregation}_down{args.down}_seed{args.seed}_carlaseed{args.carla_seed}_' \
+             f'{f"RL_reward{args.reward}_spawn{args.spawn_strategy}_arch{args.rl_variant}_logstd{args.log_std}_" if args.interactive else ""}' \
              f'lr{args.lr}{lr_settings}_b{args.batch_size}_e{args.epochs}_' \
              f'{datetime.datetime.today():%Y-%m-%d_%H-%M-%S}' if not args.eval \
         else f'logs/{args.dataset}/EVAL_{datetime.datetime.today():%Y-%m-%d_%H-%M-%S}'
@@ -129,7 +120,7 @@ def main(args):
     # model
     model = MVDet(train_set, args.arch, args.aggregation,
                   args.use_bottleneck, args.hidden_dim, args.outfeat_dim,
-                  args.rl_variant if args.interactive else '', seed=args.seed).cuda()
+                  args.rl_variant if args.interactive else '', seed=args.seed, log_std=args.log_std).cuda()
     
     # different modes of training
     if args.eval:
@@ -166,7 +157,10 @@ def main(args):
     
     # load base checkpoint
     elif args.interactive:
-        pretrained_dict = torch.load(os.path.join(f'logs/{args.dataset}/', 'base.pth'))
+        with open(f'logs/{args.dataset}/{args.arch}_{args.spawn_strategy}_expert.txt', 'r') as fp:
+            load_dir = fp.read()
+        print(load_dir)
+        pretrained_dict = torch.load(f'{load_dir}/model.pth')
         model_dict = model.state_dict()
         pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict and 'control' not in k}
         model_dict.update(pretrained_dict)
@@ -224,9 +218,14 @@ def main(args):
     print(logdir)
     trainer.test(test_loader)
 
+    # close carla env before quitting
+    if args.dataset == 'carlax':
+        base.env.close()
+
     # copy base model file if 
     if args.dataset == 'carlax' and not args.interactive:
-        shutil.copy(os.path.join(logdir, 'model.pth'), os.path.join(f'logs/{args.dataset}/', 'base.pth'))
+        with open(f'logs/{args.dataset}/{args.arch}_{args.spawn_strategy}_expert.txt', 'w') as fp:
+            fp.write(logdir)
 
 
 if __name__ == '__main__':
@@ -261,6 +260,7 @@ if __name__ == '__main__':
     # MVcontrol settings
     parser.add_argument('--interactive', action='store_true', help='interactive mode')
     parser.add_argument('--gamma', type=float, default=0.99, help='reward discount factor (default: 0.99)')
+    parser.add_argument('--log_std', type=float, default=-1., help='initial log std of action distribution')
     parser.add_argument('--vf_ratio', type=float, default=0.5, help='value loss ratio')
     parser.add_argument('--reward', type=str, help='type of reward used',
                         choices=['epi_loss', 'delta_loss', 'epi_cover_mean', 'epi_cover_max',

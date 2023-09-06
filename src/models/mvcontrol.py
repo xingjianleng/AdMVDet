@@ -13,7 +13,8 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class CamControl(nn.Module):
-    def __init__(self, action_dim, hidden_dim, variant="conv_base", kernel_size=1, aggregation='max', seed=0):
+    def __init__(self, action_dim, hidden_dim, variant="conv_base",
+                 kernel_size=1, aggregation='max', seed=0, log_std=-1.):
         super().__init__()
         self.aggregation = aggregation
         self.variant = variant
@@ -51,7 +52,7 @@ class CamControl(nn.Module):
             self.np_random_generator = np.random.default_rng(seed)
         else:
             raise NotImplementedError(f"{variant} not implemented")
-        self.log_std = nn.Parameter(-1 * torch.ones(action_dim, dtype=torch.float32))
+        self.log_std = nn.Parameter(log_std * torch.ones(action_dim, dtype=torch.float32))
 
     def forward(self, feat, randomise, action=None):
         # NOTE: random_action variant is used for random agent
