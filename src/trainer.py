@@ -215,8 +215,8 @@ class PerspectiveTrainer(object):
             # only evaluate stats for the current frame
             moda, modp, precision, recall, stats = evaluateDetection_py(res, dataset.gt_array)
             moda = torch.tensor([moda / 100]).cuda()
-            # NOTE: coefficient for balancing two factors - 0.0125
-            reward = 0.0125 * world_coverage.cuda() + moda - self.last_reward
+            # NOTE: coefficient for balancing two factors - 0.167
+            reward = 0.167 * world_coverage.cuda() + moda - self.last_reward
             # set current `moda` as last_reward for the next step
             self.last_reward = moda
         else:
