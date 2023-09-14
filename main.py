@@ -196,7 +196,9 @@ def main(args):
 
     # learn if 1. not in evaluation mode for all other rl_variants; 2. only when fine-tuning the random_action model
     if not args.eval and (args.rl_variant != "random_action" or args.fine_tune):
-        # trainer.test(test_loader)
+        # test for initial model performance
+        if args.fine_tune:
+            trainer.test(test_loader)
         for epoch in tqdm.tqdm(range(1, args.epochs + 1)):
             print('Training...')
             train_loss, train_prec = trainer.train(epoch, train_loader, optimizer, scheduler, log_interval=args.log_interval)
