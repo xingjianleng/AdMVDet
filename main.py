@@ -151,7 +151,7 @@ def main(args):
                 p.requires_grad = False
 
         # set a lower starting learning rate for fine-tuning
-        args.lr /= 2
+        args.lr /= 4
         # set a lower number of training epochs for fine-tuning
         args.epochs //=  2
     
@@ -185,7 +185,7 @@ def main(args):
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, warmup_lr_scheduler)
 
-    trainer = PerspectiveTrainer(model, logdir, args)
+    trainer = PerspectiveTrainer(model, logdir, args, args.fine_tune)
 
     # draw curve
     x_epoch = []

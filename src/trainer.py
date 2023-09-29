@@ -20,10 +20,11 @@ from src.utils.image_utils import add_heatmap_to_image, img_color_denormalize
 
 
 class PerspectiveTrainer(object):
-    def __init__(self, model, logdir, args, ):
+    def __init__(self, model, logdir, args, fine_tune=False):
         self.model = model
         self.args = args
         self.logdir = logdir
+        self.fine_tune = fine_tune
         self.denormalize = img_color_denormalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
 
     def rollout(self, dataset, step, frame, feat, tgt, randomise):
@@ -123,7 +124,7 @@ class PerspectiveTrainer(object):
 
         # policy & value loss
         # value_loss = value_loss_s.mean()
-        value_loss = F.smooth_l1_loss(values, returns)
+        value_loss = F.smooth_l1_loss(values, returns, reduction='mean')
         policy_loss = (-log_probs * (returns - values.detach())).mean()
 
         # task loss
@@ -255,8 +256,9 @@ class PerspectiveTrainer(object):
                 self.model.get_feat(imgs.cuda(), aug_mats, proj_mats, self.args.down)
             if self.args.interactive:
                 # feat is only from the first cam
+                # randomise the action from the control module if training and not fine-tuning
                 loss, (return_avg, value_loss, policy_loss), (feat, action) = \
-                    self.expand_episode(dataloader.dataset, feat, frame, world_gt['heatmap'], return_avg, True)
+                    self.expand_episode(dataloader.dataset, feat, frame, world_gt['heatmap'], return_avg, True and not self.fine_tune)
                 overall_feat = feat.mean(dim=1) if self.model.aggregation == 'mean' else feat.max(dim=1)[0]
             else:
                 # in non-interactive mode, save the initial camera coverage if it doesn't exist
