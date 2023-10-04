@@ -25,6 +25,7 @@ class PerspectiveTrainer(object):
         self.args = args
         self.logdir = logdir
         self.fine_tune = fine_tune
+        self.step_rewards = []
         self.denormalize = img_color_denormalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
 
     def rollout(self, dataset, step, frame, feat, tgt, randomise):
@@ -110,6 +111,9 @@ class PerspectiveTrainer(object):
         log_probs, values, actions, rewards = torch.stack(log_probs), torch.cat(values), \
             np.stack(actions), torch.stack(rewards)
         task_loss_s = torch.stack(task_loss_s)
+
+        # save step rewards - detach from required_grad, convert to cpu and numpy
+        self.step_rewards.extend(rewards.detach().cpu().numpy())
 
         # calculate returns for each step in episode
         # the batch size is always 1
@@ -216,7 +220,8 @@ class PerspectiveTrainer(object):
             # only evaluate stats for the current frame
             moda, modp, precision, recall, stats = evaluateDetection_py(res, dataset.gt_array)
             moda = torch.tensor([moda / 100]).cuda()
-            # NOTE: coefficient for balancing two factors - 0.167
+            # NOTE: coefficient for balancing two factors: 0.167
+            # NOTE: -- the hyperparameter is fixed, may added to args in the future --
             reward = 0.167 * world_coverage.cuda() + moda - self.last_reward
             # set current `moda` as last_reward for the next step
             self.last_reward = moda

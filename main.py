@@ -229,6 +229,10 @@ def main(args):
         with open(f'logs/{args.dataset}/{args.arch}_{args.spawn_strategy}_expert.txt', 'w') as fp:
             fp.write(logdir)
 
+    # save step rewards for analysis
+    if args.interactive and args.save_step_rewards:
+        np.save(os.path.join(logdir, 'step_rewards.npy'), trainer.step_rewards)
+
 
 if __name__ == '__main__':
     # Common settings
@@ -252,6 +256,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=None, help='random seed')
     parser.add_argument('--deterministic', action='store_true', help='whether to set deterministic options')
     parser.add_argument('--log_interval', type=int, default=100)
+    parser.add_argument('--save_step_rewards', action='store_true', help='save step rewards for analysis')
     # CarlaX settings
     parser.add_argument('--cfg_path', type=str, help='path to the config file')
     parser.add_argument('--spawn_strategy', type=str, choices=['uniform', 'gmm'])
