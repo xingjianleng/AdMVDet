@@ -7,7 +7,12 @@ import seaborn as sns
 
 
 def main():
-    path = './logs/logs_thesis/rl_training_reward_plot/'
+    # set seaborn fonts larger
+    sns.set_context("notebook", font_scale=1.25)
+
+    path = './logs/logs_thesis/rl_training_reward_plot/delta_moda/'
+    # path = './logs/logs_thesis/rl_training_reward_plot/delta_loss/'
+    method = path.split('/')[-2]
     output_path = './out/rl_training_reward_plot/'
     if not os.path.exists(output_path):
         os.makedirs(output_path)
@@ -19,18 +24,16 @@ def main():
     
     # get results, sample for every 10 steps
     results = np.stack(results).squeeze()
-    print(results.shape)
-    mask = np.arange(0, results.shape[1], 10)
-    results = results[:, mask]
-    print(results.shape)
 
     df = pd.DataFrame(results).melt(var_name="Timesteps", value_name="Reward")
 
-    plt.figure(figsize=(10,6))
-    sns.lineplot(x="Timesteps", y="Reward", data=df, errorbar='sd')
-    plt.title("Plot of reward versus timesteps across runs")
+    plt.figure(figsize=(10,7))
+    sns.lineplot(x="Timesteps", y="Reward", data=df, errorbar='sd', color='green', label='Stepwise rewards')
+    sns.regplot(x="Timesteps", y="Reward", data=df, scatter=False, color='red', label='Regression line')
+    # plt.title(f"Plot of reward versus timesteps across runs with {method} method")
+    plt.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(output_path, 'rl_training_reward_plot.pdf'))
+    plt.savefig(os.path.join(output_path, f'rl_training_reward_plot_{method}.pdf'))
 
 
 if __name__ == '__main__':
