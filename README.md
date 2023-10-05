@@ -1,16 +1,9 @@
 # AdMVDet
 
-## Overview
-Adaptive Multiview Detection, in short, AdMVDet, refers to the network framework that enables camera controls to adaptively detect pedestrians in the scene. The multiview detector is powered by the MVDet model developed by [Hou *et al.* (2020)](https://link.springer.com/chapter/10.1007/978-3-030-58571-6_1), and the adaptive controller agent is trained using the reinforcement learning algorithm.
-
-The source code in this repository is written for the purpose of my 2023 Honours project at the Australian National University (ANU).
-
-In addition, credits to the [MVSelect](https://github.com/hou-yz/MVSelect) repository by [Yunzhong Hou](https://github.com/hou-yz), from which this repository is developed.
-
 ## Contents
 - [AdMVDet](#admvdet)
-  - [Overview](#overview)
   - [Contents](#contents)
+  - [Overview](#overview)
   - [Prerequisites](#prerequisites)
   - [CARLA environment preparation](#carla-environment-preparation)
   - [Code Execution](#code-execution)
@@ -19,6 +12,13 @@ In addition, credits to the [MVSelect](https://github.com/hou-yz/MVSelect) repos
     - [Phase 2: Reinforcement learning agent training](#phase-2-reinforcement-learning-agent-training)
     - [Phase 3: Detector output heads fine-tuning](#phase-3-detector-output-heads-fine-tuning)
     - [Conducting experiments in parallel](#conducting-experiments-in-parallel)
+
+## Overview
+Adaptive Multiview Detection, in short, AdMVDet, refers to the network framework that enables camera controls to adaptively detect pedestrians in the scene. The multiview detector is powered by the MVDet model developed by [Hou *et al.* (2020)](https://link.springer.com/chapter/10.1007/978-3-030-58571-6_1), and the adaptive controller agent is trained using the reinforcement learning algorithm.
+
+The source code in this repository is written for the purpose of my 2023 Honours project at the Australian National University (ANU).
+
+In addition, credits to the [MVSelect](https://github.com/hou-yz/MVSelect) repository by [Yunzhong Hou](https://github.com/hou-yz), from which this repository is developed.
 
 ## Prerequisites
 To run the code, the machine MUST have a number of GPUs that are both greater than or equal to two and a multiple of two, with CUDA support. The code has been tested on Ubuntu 18.04.3 with Python 3.8.17 and CUDA 11.6.
