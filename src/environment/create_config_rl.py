@@ -3,8 +3,8 @@ import json
 
 
 def main():
-    # gym env
-    cfg_path = "./cfg/RL/"
+    # gym env, 1st config
+    cfg_path = "./cfg/"
     try:
         os.makedirs(cfg_path)
     except FileExistsError:
