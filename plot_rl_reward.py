@@ -8,10 +8,10 @@ import seaborn as sns
 
 def main():
     # set seaborn fonts larger
-    sns.set_context("notebook", font_scale=1.25)
+    sns.set_context("notebook", font_scale=1.5)
 
     path = './logs/logs_thesis/rl_training_reward_plot/delta_moda/'
-    # path = './logs/logs_thesis/rl_training_reward_plot/delta_loss/'
+    # path = './logs/logs_thesis/rl_training_reward_plot/epi_loss/'
     method = path.split('/')[-2]
     output_path = './out/rl_training_reward_plot/'
     if not os.path.exists(output_path):
